@@ -20,6 +20,14 @@ type InvitationRow = {
   is_active?: boolean | null;
 };
 
+type CharityPromiseRow = {
+  id: string;
+  campaign_id?: string | null;
+  telegram_user_id?: number | null;
+  promise_type?: string | null;
+  status?: string | null;
+};
+
 function normalizeReference(raw: unknown) {
   return String(raw || '')
     .trim()
@@ -80,6 +88,101 @@ async function loadInvitationByCode(supabase: any, invitationCode: string): Prom
   return null;
 }
 
+async function loadPromiseById(supabase: any, promiseId: string): Promise<CharityPromiseRow | null> {
+  const selectCandidates = [
+    'id, campaign_id, telegram_user_id, promise_type, status',
+    'id, campaign_id, telegram_user_id, promise_type',
+    'id, campaign_id, telegram_user_id',
+    'id, campaign_id',
+    'id',
+  ];
+
+  for (const selectClause of selectCandidates) {
+    const { data, error } = await supabase
+      .from('charity_promises')
+      .select(selectClause)
+      .eq('id', promiseId)
+      .maybeSingle();
+
+    if (!error) return (data || null) as CharityPromiseRow | null;
+    if (
+      isMissingColumn(error, 'status') ||
+      isMissingColumn(error, 'promise_type') ||
+      isMissingColumn(error, 'telegram_user_id') ||
+      isMissingColumn(error, 'campaign_id')
+    ) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function insertPromiseExecutionWithFallback(supabase: any, payload: Record<string, unknown>) {
+  let working = { ...payload };
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const { data, error } = await supabase.from('charity_promise_executions').insert(working).select('*').single();
+    if (!error) return data || null;
+
+    const missingCandidates = [
+      'execution_type',
+      'campaign_id',
+      'telegram_user_id',
+      'donation_id',
+      'reference_number',
+      'receipt_file_url',
+      'receipt_file_name',
+      'approval_status',
+      'notes',
+      'updated_at',
+    ];
+    const missing = missingCandidates.find((column) => isMissingColumn(error, column));
+    if (!missing || !(missing in working)) break;
+    delete (working as any)[missing];
+  }
+  return null;
+}
+
+async function updateDonationPromiseExecutionWithFallback(
+  supabase: any,
+  donationId: string,
+  executionId: string
+) {
+  const payloadCandidates = [
+    { promise_execution_id: executionId, updated_at: new Date().toISOString() },
+    { promise_execution_id: executionId },
+  ];
+  for (const payload of payloadCandidates) {
+    const result = await supabase.from('charity_donations').update(payload).eq('id', donationId);
+    if (!result.error) return true;
+    if (isMissingColumn(result.error, 'promise_execution_id') || isMissingColumn(result.error, 'updated_at')) {
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
+async function updatePromiseStatusWithFallback(
+  supabase: any,
+  promiseId: string,
+  status: string
+) {
+  const payloadCandidates = [
+    { status, updated_at: new Date().toISOString() },
+    { status },
+  ];
+  for (const payload of payloadCandidates) {
+    const result = await supabase.from('charity_promises').update(payload).eq('id', promiseId);
+    if (!result.error) return true;
+    if (isMissingColumn(result.error, 'status') || isMissingColumn(result.error, 'updated_at')) {
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createAdminClient();
@@ -107,8 +210,10 @@ export async function POST(request: NextRequest) {
     const donationAmount = Number(formData.get('donationAmount') || 0);
     const referenceNumber = normalizeReference(formData.get('referenceNumber'));
     const invitationCode = normalizeDiscountCode(formData.get('invitationCode'));
+    const promiseId = String(formData.get('promiseId') || '').trim();
     const receipt = formData.get('receipt') as File | null;
     let invitationId: string | null = null;
+    let resolvedPromise: CharityPromiseRow | null = null;
 
     if (!campaignId) {
       return NextResponse.json({ message: 'Campaign is required' }, { status: 400 });
@@ -119,6 +224,33 @@ export async function POST(request: NextRequest) {
     if (!referenceNumber) {
       return NextResponse.json({ message: 'Reference number is required' }, { status: 400 });
     }
+
+    if (promiseId) {
+      const promise = await loadPromiseById(supabase, promiseId);
+      if (!promise?.id) {
+        return NextResponse.json({ message: 'Promise record not found' }, { status: 400 });
+      }
+      if (String(promise.campaign_id || '').trim() && String(promise.campaign_id || '').trim() !== campaignId) {
+        return NextResponse.json({ message: 'Promise campaign mismatch' }, { status: 400 });
+      }
+      if (
+        promise.telegram_user_id !== null &&
+        promise.telegram_user_id !== undefined &&
+        Number(promise.telegram_user_id) !== Number(auth.user.id)
+      ) {
+        return NextResponse.json({ message: 'Promise ownership mismatch' }, { status: 403 });
+      }
+      const promiseType = String(promise.promise_type || 'cash').trim().toLowerCase();
+      if (promiseType !== 'cash') {
+        return NextResponse.json({ message: 'Only cash promises can be executed via donation payment flow' }, { status: 400 });
+      }
+      const promiseStatus = String(promise.status || '').trim().toLowerCase();
+      if (['fulfilled', 'executed', 'cancelled'].includes(promiseStatus)) {
+        return NextResponse.json({ message: 'Promise is already completed or closed' }, { status: 400 });
+      }
+      resolvedPromise = promise;
+    }
+
     if (invitationCode) {
       const invitation = await loadInvitationByCode(supabase, invitationCode);
       if (!invitation) {
@@ -230,6 +362,8 @@ export async function POST(request: NextRequest) {
       receipt_file_url: receiptPath,
       receipt_file_name: receiptFileName,
       approval_status: 'pending',
+      promise_id: resolvedPromise?.id || null,
+      promise_execution_id: null,
     };
 
     const insertCandidates: Array<Record<string, unknown>> = [
@@ -242,7 +376,18 @@ export async function POST(request: NextRequest) {
         ...insertBase,
         invitation_code: invitationCode || null,
       },
-      insertBase,
+      {
+        campaign_id: campaignId,
+        telegram_user_id: auth.user.id,
+        donor_name: donorName,
+        donor_phone: donorPhone || null,
+        donation_amount: Number(donationAmount.toFixed(2)),
+        payment_method: 'manual',
+        reference_number: referenceNumber,
+        receipt_file_url: receiptPath,
+        receipt_file_name: receiptFileName,
+        approval_status: 'pending',
+      },
     ];
 
     let data: any = null;
@@ -273,6 +418,26 @@ export async function POST(request: NextRequest) {
       } catch (usageError) {
         console.error('[charity-donate] invitation usage update failed:', usageError);
       }
+    }
+
+    if (resolvedPromise?.id) {
+      const execution = await insertPromiseExecutionWithFallback(supabase, {
+        promise_id: resolvedPromise.id,
+        campaign_id: campaignId,
+        telegram_user_id: auth.user.id,
+        execution_type: 'cash_collection',
+        donation_id: data.id,
+        reference_number: referenceNumber,
+        receipt_file_url: receiptPath,
+        receipt_file_name: receiptFileName,
+        approval_status: 'pending',
+        notes: 'Cash promise execution submitted via mini app donation flow',
+        updated_at: new Date().toISOString(),
+      });
+      if (execution?.id) {
+        await updateDonationPromiseExecutionWithFallback(supabase, data.id, String(execution.id));
+      }
+      await updatePromiseStatusWithFallback(supabase, resolvedPromise.id, 'active');
     }
 
     await sendCharityDonationThankYou(supabase, data.id, 'submitted');

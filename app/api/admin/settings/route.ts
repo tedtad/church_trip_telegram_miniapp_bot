@@ -41,6 +41,9 @@ const DEFAULT_SETTINGS = {
   gnpl_penalty_period_days: 7,
   gnpl_reminder_enabled: true,
   gnpl_reminder_days_before: 0,
+  manual_cash_approver_role: 'admin',
+  charity_promise_reminder_enabled: true,
+  charity_promise_reminder_days_before: 1,
   receipt_intelligence_enabled: false,
   receipt_sample_collection_enabled: false,
 };
@@ -83,6 +86,9 @@ const UPDATABLE_FIELDS = new Set([
   'gnpl_penalty_period_days',
   'gnpl_reminder_enabled',
   'gnpl_reminder_days_before',
+  'manual_cash_approver_role',
+  'charity_promise_reminder_enabled',
+  'charity_promise_reminder_days_before',
   'receipt_intelligence_enabled',
   'receipt_sample_collection_enabled',
 ]);
@@ -250,6 +256,17 @@ function normalizeBody(body: any) {
     const numeric = Number(payload.gnpl_reminder_days_before);
     payload.gnpl_reminder_days_before = Number.isFinite(numeric) && numeric >= 0 ? Math.floor(numeric) : 0;
   }
+  if ('manual_cash_approver_role' in payload) {
+    const role = String(payload.manual_cash_approver_role || '').trim().toLowerCase();
+    payload.manual_cash_approver_role = role || 'admin';
+  }
+  if ('charity_promise_reminder_enabled' in payload) {
+    payload.charity_promise_reminder_enabled = Boolean(payload.charity_promise_reminder_enabled);
+  }
+  if ('charity_promise_reminder_days_before' in payload) {
+    const numeric = Number(payload.charity_promise_reminder_days_before);
+    payload.charity_promise_reminder_days_before = Number.isFinite(numeric) && numeric >= 0 ? Math.floor(numeric) : 1;
+  }
   if ('receipt_intelligence_enabled' in payload) {
     payload.receipt_intelligence_enabled = Boolean(payload.receipt_intelligence_enabled);
   }
@@ -309,6 +326,12 @@ function normalizeSettingsRow(row: any) {
     gnpl_penalty_period_days: Math.max(1, Math.floor(Number(merged.gnpl_penalty_period_days || DEFAULT_SETTINGS.gnpl_penalty_period_days))),
     gnpl_reminder_enabled: merged.gnpl_reminder_enabled !== false,
     gnpl_reminder_days_before: Math.max(0, Math.floor(Number(merged.gnpl_reminder_days_before || DEFAULT_SETTINGS.gnpl_reminder_days_before))),
+    manual_cash_approver_role: String(merged.manual_cash_approver_role || DEFAULT_SETTINGS.manual_cash_approver_role).trim() || 'admin',
+    charity_promise_reminder_enabled: merged.charity_promise_reminder_enabled !== false,
+    charity_promise_reminder_days_before: Math.max(
+      0,
+      Math.floor(Number(merged.charity_promise_reminder_days_before || DEFAULT_SETTINGS.charity_promise_reminder_days_before))
+    ),
     receipt_intelligence_enabled: Boolean(merged.receipt_intelligence_enabled),
     receipt_sample_collection_enabled: Boolean(merged.receipt_sample_collection_enabled),
   };

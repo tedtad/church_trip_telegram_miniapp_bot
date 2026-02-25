@@ -21,11 +21,25 @@ interface DonationStep {
   step: 1 | 2;
   campaignId?: string;
   campaignName?: string;
+  promiseId?: string;
   donorName: string;
   donorPhone: string;
   donationAmount: string;
   referenceNumber: string;
   receipt?: File;
+}
+
+interface PromiseRow {
+  id: string;
+  campaign_id?: string;
+  donor_name?: string;
+  donor_phone?: string | null;
+  promise_type?: string;
+  pledged_amount?: number | null;
+  item_description?: string | null;
+  due_at?: string | null;
+  status?: string | null;
+  created_at?: string;
 }
 
 type Lang = 'en' | 'am';
@@ -98,13 +112,17 @@ function normalizeDiscountCodeInput(value: string) {
 }
 
 export default function CharityPage() {
+  const [viewMode, setViewMode] = useState<'donate' | 'promises'>('donate');
   const [lang, setLang] = useState<Lang>('am');
   const [initData, setInitData] = useState('');
   const [appName, setAppName] = useState('TicketHub');
   const [invitationCode, setInvitationCode] = useState('');
   const [campaignHintId, setCampaignHintId] = useState('');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [promises, setPromises] = useState<PromiseRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [promisesLoading, setPromisesLoading] = useState(false);
+  const [creatingPromise, setCreatingPromise] = useState(false);
   const [accessMessage, setAccessMessage] = useState('');
   const [donation, setDonation] = useState<DonationStep>({
     step: 1,
@@ -116,6 +134,13 @@ export default function CharityPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [promiseCampaignId, setPromiseCampaignId] = useState('');
+  const [promiseType, setPromiseType] = useState<'cash' | 'in_kind'>('cash');
+  const [pledgedAmount, setPledgedAmount] = useState('');
+  const [itemDescription, setItemDescription] = useState('');
+  const [promiseDueAt, setPromiseDueAt] = useState('');
+  const [promiseReminderDays, setPromiseReminderDays] = useState('1');
+  const [promiseNote, setPromiseNote] = useState('');
 
   const t = useCallback((key: string) => COPY[lang]?.[key] || COPY.en[key] || key, [lang]);
 
@@ -141,6 +166,22 @@ export default function CharityPage() {
       setError((err as Error)?.message || 'Failed to load campaigns');
     } finally {
       setLoading(false);
+    }
+  }, [apiFetch]);
+
+  const loadPromises = useCallback(async () => {
+    try {
+      setPromisesLoading(true);
+      const res = await apiFetch('/api/charity/promises');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.message || data?.error || 'Failed to load promises');
+      }
+      setPromises((data.promises || []) as PromiseRow[]);
+    } catch (err) {
+      setError((err as Error)?.message || 'Failed to load promises');
+    } finally {
+      setPromisesLoading(false);
     }
   }, [apiFetch]);
 
@@ -207,8 +248,9 @@ export default function CharityPage() {
         return;
       }
       await loadCampaigns();
+      await loadPromises();
     })();
-  }, [ensureMiniAppCharityAccess, loadCampaigns]);
+  }, [ensureMiniAppCharityAccess, loadCampaigns, loadPromises]);
 
   useEffect(() => {
     if (!campaignHintId || campaigns.length === 0) return;
@@ -219,9 +261,16 @@ export default function CharityPage() {
       step: 2,
       campaignId: matched.id,
       campaignName: matched.name,
+      promiseId: undefined,
     }));
     setCampaignHintId('');
   }, [campaignHintId, campaigns]);
+
+  useEffect(() => {
+    if (!promiseCampaignId && campaigns[0]?.id) {
+      setPromiseCampaignId(campaigns[0].id);
+    }
+  }, [campaigns, promiseCampaignId]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -244,6 +293,7 @@ export default function CharityPage() {
       formData.append('donorPhone', donation.donorPhone);
       formData.append('donationAmount', donation.donationAmount);
       formData.append('referenceNumber', donation.referenceNumber);
+      if (donation.promiseId) formData.append('promiseId', donation.promiseId);
       if (initData) formData.append('initData', initData);
       if (invitationCode) formData.append('invitationCode', invitationCode);
       if (donation.receipt) {
@@ -266,12 +316,110 @@ export default function CharityPage() {
         donorPhone: donation.donorPhone,
         donationAmount: '',
         referenceNumber: '',
+        promiseId: undefined,
       });
       await loadCampaigns();
+      await loadPromises();
     } catch (err) {
       setError((err as Error)?.message || 'Failed to submit donation');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleCreatePromise(e: React.FormEvent) {
+    e.preventDefault();
+    setCreatingPromise(true);
+    setError('');
+    setSuccess('');
+    try {
+      if (!promiseCampaignId) {
+        throw new Error('Please select a campaign for the promise.');
+      }
+      if (promiseType === 'cash' && Number(pledgedAmount || 0) <= 0) {
+        throw new Error('Cash promise amount must be greater than zero.');
+      }
+      if (promiseType === 'in_kind' && !itemDescription.trim()) {
+        throw new Error('In-kind promise details are required.');
+      }
+
+      const response = await apiFetch('/api/charity/promises', {
+        method: 'POST',
+        body: JSON.stringify({
+          campaignId: promiseCampaignId,
+          donorName: donation.donorName,
+          donorPhone: donation.donorPhone,
+          promiseType,
+          pledgedAmount: promiseType === 'cash' ? Number(pledgedAmount || 0) : undefined,
+          itemDescription: promiseType === 'in_kind' ? itemDescription.trim() : undefined,
+          dueAt: promiseDueAt || undefined,
+          reminderDaysBefore: Number(promiseReminderDays || 1),
+          referenceNote: promiseNote.trim() || undefined,
+          invitationCode: invitationCode || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.message || data?.error || 'Failed to create promise');
+      }
+
+      setSuccess('Promise logged successfully.');
+      setPledgedAmount('');
+      setItemDescription('');
+      setPromiseDueAt('');
+      setPromiseReminderDays('1');
+      setPromiseNote('');
+      await loadPromises();
+    } catch (err) {
+      setError((err as Error)?.message || 'Failed to create promise');
+    } finally {
+      setCreatingPromise(false);
+    }
+  }
+
+  async function handleExecutePromise(promise: PromiseRow) {
+    try {
+      setError('');
+      setSuccess('');
+      const details =
+        String(promise.promise_type || '').toLowerCase() === 'in_kind'
+          ? window.prompt('Enter in-kind execution details', String(promise.item_description || '')) ?? ''
+          : '';
+      if (String(promise.promise_type || '').toLowerCase() === 'in_kind' && !details.trim()) {
+        setError('In-kind execution details are required.');
+        return;
+      }
+
+      const response = await apiFetch(`/api/charity/promises/${encodeURIComponent(String(promise.id || ''))}/execute`, {
+        method: 'POST',
+        body: JSON.stringify({
+          inKindDetails: details.trim() || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.message || data?.error || 'Failed to execute promise');
+      }
+
+      if (String(data?.mode || '').toLowerCase() === 'cash') {
+        const campaign = campaigns.find((row) => row.id === String(promise.campaign_id || ''));
+        setDonation((prev) => ({
+          ...prev,
+          step: 2,
+          campaignId: String(promise.campaign_id || ''),
+          campaignName: campaign?.name || prev.campaignName,
+          promiseId: String(promise.id || ''),
+          donationAmount:
+            Number(promise.pledged_amount || 0) > 0 ? String(Number(promise.pledged_amount || 0)) : prev.donationAmount,
+        }));
+        setViewMode('donate');
+        setSuccess('Promise ready for payment. Complete the normal donation submission.');
+      } else {
+        setSuccess('In-kind execution submitted for approval.');
+      }
+      await loadPromises();
+    } catch (err) {
+      setError((err as Error)?.message || 'Failed to execute promise');
     }
   }
 
@@ -332,7 +480,28 @@ export default function CharityPage() {
           </div>
         ) : null}
 
-        {donation.step === 1 ? (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setViewMode('donate')}
+            className={`px-3 py-2 rounded-lg text-sm ${
+              viewMode === 'donate' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300'
+            }`}
+          >
+            Donate Now
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('promises')}
+            className={`px-3 py-2 rounded-lg text-sm ${
+              viewMode === 'promises' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300'
+            }`}
+          >
+            Promise Ledger
+          </button>
+        </div>
+
+        {viewMode === 'donate' ? (donation.step === 1 ? (
           <div className="space-y-4">
             <h2 className="text-xl font-semibold">{t('selectCampaign')}</h2>
 
@@ -389,6 +558,7 @@ export default function CharityPage() {
                             step: 2,
                             campaignId: campaign.id,
                             campaignName: campaign.name,
+                            promiseId: undefined,
                           }))
                         }
                         className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-sm font-medium"
@@ -410,6 +580,11 @@ export default function CharityPage() {
               {invitationCode ? (
                 <p className="text-xs text-slate-400 mt-1">
                   Invitation code: <span className="font-mono text-slate-200">{invitationCode}</span>
+                </p>
+              ) : null}
+              {donation.promiseId ? (
+                <p className="text-xs text-slate-400 mt-1">
+                  Promise execution: <span className="font-mono text-slate-200">{donation.promiseId}</span>
                 </p>
               ) : null}
             </div>
@@ -501,6 +676,143 @@ export default function CharityPage() {
               </button>
             </div>
           </form>
+        )) : (
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold">Log Charity Promise</h2>
+            <form onSubmit={handleCreatePromise} className="space-y-3 rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Campaign</label>
+                <select
+                  value={promiseCampaignId}
+                  onChange={(e) => setPromiseCampaignId(e.target.value)}
+                  className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                >
+                  <option value="">Select campaign</option>
+                  {campaigns.map((campaign) => (
+                    <option key={campaign.id} value={campaign.id}>
+                      {campaign.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Promise Type</label>
+                  <select
+                    value={promiseType}
+                    onChange={(e) => setPromiseType(e.target.value === 'in_kind' ? 'in_kind' : 'cash')}
+                    className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="in_kind">In Kind</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Due Date</label>
+                  <input
+                    type="datetime-local"
+                    value={promiseDueAt}
+                    onChange={(e) => setPromiseDueAt(e.target.value)}
+                    className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                  />
+                </div>
+              </div>
+
+              {promiseType === 'cash' ? (
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Pledged Amount (ETB)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    value={pledgedAmount}
+                    onChange={(e) => setPledgedAmount(e.target.value)}
+                    className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">In-kind Details</label>
+                  <textarea
+                    value={itemDescription}
+                    onChange={(e) => setItemDescription(e.target.value)}
+                    className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Reminder Days Before</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={promiseReminderDays}
+                    onChange={(e) => setPromiseReminderDays(e.target.value)}
+                    className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Reference Note (Optional)</label>
+                  <input
+                    type="text"
+                    value={promiseNote}
+                    onChange={(e) => setPromiseNote(e.target.value)}
+                    className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={creatingPromise}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-slate-700 text-sm font-medium"
+              >
+                {creatingPromise ? 'Saving Promise...' : 'Save Promise'}
+              </button>
+            </form>
+
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold">My Promises</h3>
+              {promisesLoading ? <p className="text-slate-400 text-sm">Loading promises...</p> : null}
+              {promises.length === 0 ? (
+                <p className="text-slate-400 text-sm">No promises logged yet.</p>
+              ) : (
+                promises.map((row) => {
+                  const campaign = campaigns.find((c) => c.id === String(row.campaign_id || ''));
+                  const rowStatus = String(row.status || '').toLowerCase();
+                  const canExecute = !['fulfilled', 'cancelled'].includes(rowStatus);
+                  return (
+                    <div key={row.id} className="rounded-lg border border-slate-700 bg-slate-900/50 p-3 space-y-1">
+                      <p className="font-medium">{campaign?.name || row.campaign_id || 'Campaign'}</p>
+                      <p className="text-xs text-slate-300">
+                        Type: {row.promise_type || '-'} | Status: {row.status || '-'}
+                      </p>
+                      <p className="text-xs text-slate-300">
+                        {String(row.promise_type || '').toLowerCase() === 'cash'
+                          ? `Amount: ETB ${Number(row.pledged_amount || 0).toFixed(2)}`
+                          : `In-kind: ${String(row.item_description || '-')}`}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        Due: {row.due_at ? new Date(row.due_at).toLocaleString() : '-'}
+                      </p>
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleExecutePromise(row)}
+                          disabled={!canExecute}
+                          className="px-3 py-1 rounded-md bg-cyan-700 hover:bg-cyan-600 disabled:bg-slate-700 text-white text-xs"
+                        >
+                          Execute Promise
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         )}
 
         <div className="pt-4 border-t border-slate-700">

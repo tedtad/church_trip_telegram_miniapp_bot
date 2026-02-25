@@ -157,6 +157,9 @@ export function resolvePermissionForAdminApi(pathnameInput: string): AdminPermis
   if (pathname === '/api/admin/reports') return 'reports_view';
   if (pathname === '/api/admin/reconciliation') return 'reconciliation_view';
   if (pathname === '/api/admin/reconciliation/match') return 'reconciliation_view';
+  if (pathname === '/api/admin/manual-cash/summary') return 'tickets_manual_sale';
+  if (pathname === '/api/admin/manual-cash/remittances') return 'reports_view';
+  if (pathname.startsWith('/api/admin/manual-cash/remittances/')) return 'reports_view';
   if (pathname === '/api/admin/users') return 'admin_users_manage';
   if (pathname === '/api/admin/trips') return 'trips_manage';
   if (pathname === '/api/admin/settings') return 'settings_manage';

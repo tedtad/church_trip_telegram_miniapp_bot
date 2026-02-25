@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { getAdminSession, adminLogout, refreshAdminSession } from '@/lib/admin-auth';
 import { AdminPermission, hasAdminPermission, normalizeAdminRole } from '@/lib/admin-rbac';
 import { Button } from '@/components/ui/button';
@@ -143,7 +144,7 @@ export default function AdminLayout({
           {visibleNavItems.map((item) => {
             const isActive = pathname === item.href;
             return (
-              <a
+              <Link
                 key={item.href}
                 href={item.href}
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${isActive
@@ -153,7 +154,7 @@ export default function AdminLayout({
               >
                 <item.icon size={20} />
                 {sidebarOpen && <span>{item.label}</span>}
-              </a>
+              </Link>
             );
           })}
         </nav>
@@ -217,12 +218,12 @@ export default function AdminLayout({
               <p className="mt-2 text-sm text-slate-300">
                 Your role does not have permission to open this page.
               </p>
-              <a
+              <Link
                 href={fallbackRoute}
                 className="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-white"
               >
                 Go to allowed page
-              </a>
+              </Link>
             </div>
           )}
         </main>

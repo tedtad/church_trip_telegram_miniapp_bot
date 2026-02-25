@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireAdminPermission } from '@/lib/admin-rbac';
 
-type ReportType = 'sales_summary' | 'payment_methods' | 'ticket_status' | 'daily_sales';
+type ReportType = 'sales_summary' | 'payment_methods' | 'ticket_status' | 'daily_sales' | 'manual_cash_by_admin';
 
 function toIsoDateStart(value: string) {
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -15,7 +15,14 @@ function toIsoDateEnd(value: string) {
 }
 
 function isReportType(value: string): value is ReportType {
-  return ['sales_summary', 'payment_methods', 'ticket_status', 'daily_sales'].includes(value);
+  return ['sales_summary', 'payment_methods', 'ticket_status', 'daily_sales', 'manual_cash_by_admin'].includes(value);
+}
+
+function isRelationMissing(error: unknown, relationName: string) {
+  const message = String((error as any)?.message || '').toLowerCase();
+  const code = String((error as any)?.code || '').toUpperCase();
+  if (code === '42P01') return true;
+  return message.includes('relation') && message.includes(relationName.toLowerCase()) && message.includes('does not exist');
 }
 
 function toCsv(headers: string[], rows: Array<Record<string, unknown>>) {
@@ -153,6 +160,106 @@ export async function GET(request: NextRequest) {
           headers: {
             'Content-Type': 'text/csv; charset=utf-8',
             'Content-Disposition': `attachment; filename="report_daily_sales_${Date.now()}.csv"`,
+          },
+        });
+      }
+      return NextResponse.json({ ok: true, type, filters: { dateFrom, dateTo }, headers, rows });
+    }
+
+    if (type === 'manual_cash_by_admin') {
+      let salesQuery = supabase
+        .from('receipts')
+        .select('manual_sale_admin_id, amount_paid, approval_status, payment_method, created_at')
+        .eq('payment_method', 'cash')
+        .not('manual_sale_admin_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(10000);
+      if (fromIso) salesQuery = salesQuery.gte('created_at', fromIso);
+      if (toIso) salesQuery = salesQuery.lte('created_at', toIso);
+      const { data: salesData, error: salesError } = await salesQuery;
+      if (salesError) return NextResponse.json({ ok: false, error: salesError.message }, { status: 500 });
+
+      let remittanceData: any[] = [];
+      let remittanceQuery = supabase
+        .from('manual_cash_remittances')
+        .select('submitted_by_admin_id, remitted_amount, approval_status, created_at')
+        .order('created_at', { ascending: false })
+        .limit(10000);
+      if (fromIso) remittanceQuery = remittanceQuery.gte('created_at', fromIso);
+      if (toIso) remittanceQuery = remittanceQuery.lte('created_at', toIso);
+      const { data: remittances, error: remittanceError } = await remittanceQuery;
+      if (remittanceError && !isRelationMissing(remittanceError, 'manual_cash_remittances')) {
+        return NextResponse.json({ ok: false, error: remittanceError.message }, { status: 500 });
+      }
+      if (!remittanceError) {
+        remittanceData = remittances || [];
+      }
+
+      const byAdmin = new Map<
+        string,
+        {
+          adminId: string;
+          cashSalesCount: number;
+          totalCashSold: number;
+          approvedRemitted: number;
+          pendingRemitted: number;
+        }
+      >();
+
+      for (const row of salesData || []) {
+        const adminId = String((row as any).manual_sale_admin_id || '').trim();
+        if (!adminId) continue;
+        const status = String((row as any).approval_status || '').toLowerCase();
+        if (status === 'rejected') continue;
+        const amount = Number((row as any).amount_paid || 0);
+        const current = byAdmin.get(adminId) || {
+          adminId,
+          cashSalesCount: 0,
+          totalCashSold: 0,
+          approvedRemitted: 0,
+          pendingRemitted: 0,
+        };
+        current.cashSalesCount += 1;
+        current.totalCashSold += amount;
+        byAdmin.set(adminId, current);
+      }
+
+      for (const row of remittanceData) {
+        const adminId = String((row as any).submitted_by_admin_id || '').trim();
+        if (!adminId) continue;
+        const amount = Number((row as any).remitted_amount || 0);
+        const status = String((row as any).approval_status || '').toLowerCase();
+        const current = byAdmin.get(adminId) || {
+          adminId,
+          cashSalesCount: 0,
+          totalCashSold: 0,
+          approvedRemitted: 0,
+          pendingRemitted: 0,
+        };
+        if (status === 'approved') current.approvedRemitted += amount;
+        if (status === 'pending') current.pendingRemitted += amount;
+        byAdmin.set(adminId, current);
+      }
+
+      const rows = [...byAdmin.values()]
+        .map((row) => {
+          const outstanding = Math.max(0, row.totalCashSold - row.approvedRemitted);
+          return {
+            adminId: row.adminId,
+            cashSalesCount: row.cashSalesCount,
+            totalCashSold: Number(row.totalCashSold.toFixed(2)),
+            approvedRemitted: Number(row.approvedRemitted.toFixed(2)),
+            pendingRemitted: Number(row.pendingRemitted.toFixed(2)),
+            outstanding: Number(outstanding.toFixed(2)),
+          };
+        })
+        .sort((a, b) => b.outstanding - a.outstanding);
+      const headers = ['adminId', 'cashSalesCount', 'totalCashSold', 'approvedRemitted', 'pendingRemitted', 'outstanding'];
+      if (exportMode === 'csv') {
+        return new NextResponse(toCsv(headers, rows), {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="report_manual_cash_by_admin_${Date.now()}.csv"`,
           },
         });
       }

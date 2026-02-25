@@ -9,6 +9,8 @@ type InvitationRow = {
   id: string;
   invitation_code?: string | null;
   trip_id?: string | null;
+  target?: string | null;
+  campaign_id?: string | null;
   max_uses?: number | null;
   current_uses?: number | null;
   used_count?: number | null;
@@ -36,12 +38,13 @@ function isMissingColumn(error: unknown, columnName: string) {
 
 async function loadInvitationByCode(supabase: any, code: string): Promise<InvitationRow | null> {
   const selectCandidates = [
-    'id, invitation_code, trip_id, max_uses, current_uses, used_count, valid_from, expires_at, is_active',
-    'id, invitation_code, trip_id, max_uses, current_uses, used_count, expires_at, is_active',
-    'id, invitation_code, trip_id, max_uses, current_uses, used_count, expires_at',
-    'id, invitation_code, trip_id, max_uses, current_uses, used_count',
-    'id, invitation_code, trip_id, max_uses, current_uses',
-    'id, invitation_code, trip_id',
+    'id, invitation_code, trip_id, target, campaign_id, max_uses, current_uses, used_count, valid_from, expires_at, is_active',
+    'id, invitation_code, trip_id, target, campaign_id, max_uses, current_uses, used_count, expires_at, is_active',
+    'id, invitation_code, trip_id, target, campaign_id, max_uses, current_uses, used_count, expires_at',
+    'id, invitation_code, trip_id, target, campaign_id, max_uses, current_uses, used_count',
+    'id, invitation_code, trip_id, target, campaign_id, max_uses, current_uses',
+    'id, invitation_code, trip_id, target, campaign_id',
+    'id, invitation_code, trip_id, target',
     'id, invitation_code',
   ];
 
@@ -124,8 +127,8 @@ export default async function InviteCodePage({ params, searchParams = {} }: Page
   const resolvedParams = await Promise.resolve(params);
   const resolvedSearchParams = await Promise.resolve(searchParams);
   const code = normalizeDiscountCode(resolvedParams?.code || '');
-  const target = getFirst(resolvedSearchParams.target).toLowerCase() === 'charity' ? 'charity' : 'booking';
-  const campaignId = getFirst(resolvedSearchParams.campaignId || resolvedSearchParams.campaign);
+  const queryTarget = getFirst(resolvedSearchParams.target).toLowerCase() === 'charity' ? 'charity' : '';
+  const queryCampaignId = getFirst(resolvedSearchParams.campaignId || resolvedSearchParams.campaign);
   const initData = getFirst(resolvedSearchParams.initData);
   const tgWebAppData = getFirst(resolvedSearchParams.tgWebAppData);
 
@@ -147,6 +150,10 @@ export default async function InviteCodePage({ params, searchParams = {} }: Page
   const invitation = await loadInvitationByCode(supabase, code);
   const status = isInvitationUsable(invitation);
   if (status.ok) {
+    const invitationTarget =
+      String(invitation?.target || '').trim().toLowerCase() === 'charity' ? 'charity' : 'booking';
+    const target = queryTarget || invitationTarget;
+    const campaignId = queryCampaignId || String(invitation?.campaign_id || '').trim();
     const redirectUrl = buildRedirectUrl({
       code,
       target,

@@ -40,6 +40,9 @@ export default function SettingsPage() {
     gnpl_penalty_period_days: 7,
     gnpl_reminder_enabled: true,
     gnpl_reminder_days_before: 0,
+    manual_cash_approver_role: 'admin',
+    charity_promise_reminder_enabled: true,
+    charity_promise_reminder_days_before: 1,
     receipt_intelligence_enabled: false,
     receipt_sample_collection_enabled: false,
   })
@@ -104,6 +107,9 @@ export default function SettingsPage() {
           gnpl_penalty_period_days: Number(data.settings.gnpl_penalty_period_days || 7),
           gnpl_reminder_enabled: data.settings.gnpl_reminder_enabled !== false,
           gnpl_reminder_days_before: Number(data.settings.gnpl_reminder_days_before || 0),
+          manual_cash_approver_role: String(data.settings.manual_cash_approver_role || 'admin'),
+          charity_promise_reminder_enabled: data.settings.charity_promise_reminder_enabled !== false,
+          charity_promise_reminder_days_before: Number(data.settings.charity_promise_reminder_days_before || 1),
           receipt_intelligence_enabled: Boolean(data.settings.receipt_intelligence_enabled),
           receipt_sample_collection_enabled: Boolean(data.settings.receipt_sample_collection_enabled),
         }))
@@ -573,6 +579,58 @@ export default function SettingsPage() {
             />
             Enable discount code input in Mini App
           </label>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Charity Promise Controls</CardTitle>
+          <CardDescription>Configure reminders and manual cash remittance approver role.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.charity_promise_reminder_enabled}
+              onChange={(e) =>
+                setSettings((prev) => ({ ...prev, charity_promise_reminder_enabled: e.target.checked }))
+              }
+            />
+            Enable charity promise reminders
+          </label>
+
+          <div>
+            <label className="text-sm font-medium">Promise reminder lead days</label>
+            <input
+              type="number"
+              min={0}
+              value={settings.charity_promise_reminder_days_before}
+              onChange={(e) =>
+                setSettings((prev) => ({
+                  ...prev,
+                  charity_promise_reminder_days_before: Math.max(0, Number(e.target.value || 0)),
+                }))
+              }
+              className="mt-1 w-full px-3 py-2 border rounded-md"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium">Manual cash approver role</label>
+            <select
+              value={settings.manual_cash_approver_role}
+              onChange={(e) =>
+                setSettings((prev) => ({ ...prev, manual_cash_approver_role: e.target.value }))
+              }
+              className="mt-1 w-full px-3 py-2 border rounded-md"
+            >
+              <option value="admin">admin</option>
+              <option value="moderator">moderator</option>
+              <option value="analyst">analyst</option>
+              <option value="sales_agent">sales_agent</option>
+              <option value="system_admin">system_admin</option>
+            </select>
+          </div>
         </CardContent>
       </Card>
 

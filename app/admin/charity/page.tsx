@@ -32,11 +32,46 @@ interface Donation {
   created_at: string
 }
 
+interface CharityPromise {
+  id: string
+  campaign_id: string
+  donor_name: string
+  donor_phone?: string | null
+  promise_type?: string | null
+  pledged_amount?: number | null
+  item_description?: string | null
+  due_at?: string | null
+  status?: string | null
+  created_at: string
+  charity_campaigns?: { name?: string; cause?: string } | null
+}
+
+interface CharityPromiseExecution {
+  id: string
+  promise_id: string
+  campaign_id?: string | null
+  execution_type?: string | null
+  donation_id?: string | null
+  in_kind_details?: string | null
+  in_kind_estimated_value?: number | null
+  approval_status?: string | null
+  created_at: string
+  charity_promises?: {
+    donor_name?: string
+    donor_phone?: string | null
+    promise_type?: string | null
+    campaign_id?: string | null
+  } | null
+  charity_campaigns?: { name?: string; cause?: string } | null
+}
+
 export default function CharityPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [donations, setDonations] = useState<Donation[]>([])
+  const [promises, setPromises] = useState<CharityPromise[]>([])
+  const [executions, setExecutions] = useState<CharityPromiseExecution[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'campaigns' | 'donations'>('campaigns')
+  const [activeTab, setActiveTab] = useState<'campaigns' | 'donations' | 'promises' | 'executions'>('campaigns')
   const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null)
   const [showNewCampaign, setShowNewCampaign] = useState(false)
   const [runningSummary, setRunningSummary] = useState(false)
@@ -63,6 +98,10 @@ export default function CharityPage() {
       .filter((d) => d.approval_status === 'approved')
       .reduce((sum, donation) => sum + Number(donation.donation_amount || 0), 0)
     const approvalRate = totalDonations > 0 ? (approvedDonations / totalDonations) * 100 : 0
+    const totalPromises = promises.length
+    const pendingPromises = promises.filter((row) => String(row.status || '').toLowerCase() === 'pending').length
+    const totalExecutions = executions.length
+    const pendingExecutions = executions.filter((row) => String(row.approval_status || '').toLowerCase() === 'pending').length
 
     return {
       totalCampaigns,
@@ -75,8 +114,12 @@ export default function CharityPage() {
       rejectedDonations,
       approvedAmount,
       approvalRate,
+      totalPromises,
+      pendingPromises,
+      totalExecutions,
+      pendingExecutions,
     }
-  }, [campaigns, donations])
+  }, [campaigns, donations, executions, promises])
 
   useEffect(() => {
     loadData()
@@ -85,11 +128,17 @@ export default function CharityPage() {
   async function loadData() {
     try {
       setLoading(true)
-      const [campaignsRes, donationsRes] = await Promise.all([
+      const [campaignsRes, donationsRes, promisesRes, executionsRes] = await Promise.all([
         fetch('/api/admin/charity/campaigns'),
         selectedCampaign
           ? fetch(`/api/admin/charity/donations?campaign=${selectedCampaign}`)
           : fetch('/api/admin/charity/donations'),
+        selectedCampaign
+          ? fetch(`/api/admin/charity/promises?campaign=${selectedCampaign}`)
+          : fetch('/api/admin/charity/promises'),
+        selectedCampaign
+          ? fetch(`/api/admin/charity/promise-executions?campaign=${selectedCampaign}`)
+          : fetch('/api/admin/charity/promise-executions'),
       ])
 
       if (campaignsRes.ok) {
@@ -100,6 +149,16 @@ export default function CharityPage() {
       if (donationsRes.ok) {
         const data = await donationsRes.json()
         setDonations(data.donations || [])
+      }
+
+      if (promisesRes.ok) {
+        const data = await promisesRes.json()
+        setPromises(data.promises || [])
+      }
+
+      if (executionsRes.ok) {
+        const data = await executionsRes.json()
+        setExecutions(data.executions || [])
       }
     } catch (err) {
       console.error('[v0] Error loading charity data:', err)
@@ -220,6 +279,42 @@ export default function CharityPage() {
     }
   }
 
+  async function approveExecution(executionId: string) {
+    const notes = prompt('Approval notes (optional):')
+    if (notes === null) return
+
+    try {
+      const res = await fetch(`/api/admin/charity/promise-executions/${executionId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes }),
+      })
+      if (res.ok) {
+        loadData()
+      }
+    } catch (err) {
+      console.error('[v0] Error approving promise execution:', err)
+    }
+  }
+
+  async function rejectExecution(executionId: string) {
+    const reason = prompt('Rejection reason:')
+    if (reason === null) return
+
+    try {
+      const res = await fetch(`/api/admin/charity/promise-executions/${executionId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      })
+      if (res.ok) {
+        loadData()
+      }
+    } catch (err) {
+      console.error('[v0] Error rejecting promise execution:', err)
+    }
+  }
+
   if (loading && campaigns.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -237,7 +332,7 @@ export default function CharityPage() {
         </h1>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
         <Card className="bg-slate-900/50 border-slate-700">
           <CardHeader className="pb-2">
             <CardDescription>Total Campaigns</CardDescription>
@@ -274,6 +369,24 @@ export default function CharityPage() {
             Approval rate: {summary.approvalRate.toFixed(1)}% | Rejected: {summary.rejectedDonations}
           </CardContent>
         </Card>
+        <Card className="bg-slate-900/50 border-slate-700">
+          <CardHeader className="pb-2">
+            <CardDescription>Promises</CardDescription>
+            <CardTitle className="text-2xl">{summary.totalPromises}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-slate-400">
+            Pending: {summary.pendingPromises}
+          </CardContent>
+        </Card>
+        <Card className="bg-slate-900/50 border-slate-700">
+          <CardHeader className="pb-2">
+            <CardDescription>Promise Executions</CardDescription>
+            <CardTitle className="text-2xl">{summary.totalExecutions}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-slate-400">
+            Pending: {summary.pendingExecutions}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="flex gap-2 border-b border-slate-700">
@@ -297,24 +410,37 @@ export default function CharityPage() {
         >
           Donations
         </button>
+        <button
+          onClick={() => setActiveTab('promises')}
+          className={`px-4 py-2 font-medium ${
+            activeTab === 'promises'
+              ? 'border-b-2 border-cyan-500 text-cyan-500'
+              : 'text-slate-400 hover:text-slate-300'
+          }`}
+        >
+          Promises
+        </button>
+        <button
+          onClick={() => setActiveTab('executions')}
+          className={`px-4 py-2 font-medium ${
+            activeTab === 'executions'
+              ? 'border-b-2 border-cyan-500 text-cyan-500'
+              : 'text-slate-400 hover:text-slate-300'
+          }`}
+        >
+          Executions
+        </button>
       </div>
 
-      {activeTab === 'campaigns' ? (
+      {activeTab === 'campaigns' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-semibold">Active Campaigns</h2>
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={runRankingSummary}
-                disabled={runningSummary}
-              >
+              <Button variant="outline" onClick={runRankingSummary} disabled={runningSummary}>
                 {runningSummary ? 'Posting...' : 'Post Ranking Summary'}
               </Button>
-              <Button
-                onClick={() => setShowNewCampaign(!showNewCampaign)}
-                className="gap-2"
-              >
+              <Button onClick={() => setShowNewCampaign(!showNewCampaign)} className="gap-2">
                 <Plus className="w-4 h-4" />
                 New Campaign
               </Button>
@@ -366,11 +492,7 @@ export default function CharityPage() {
                   <Button onClick={createCampaign} className="flex-1">
                     Create Campaign
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowNewCampaign(false)}
-                    className="flex-1"
-                  >
+                  <Button variant="outline" onClick={() => setShowNewCampaign(false)} className="flex-1">
                     Cancel
                   </Button>
                 </div>
@@ -396,48 +518,39 @@ export default function CharityPage() {
                   <CardDescription>{campaign.cause}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="space-y-2">
-                      {campaign.description && (
-                        <p className="text-sm text-slate-300">{campaign.description}</p>
-                      )}
-                      <div className="flex flex-wrap gap-3 text-xs">
-                        {campaign.telegram_channel_url ? (
-                          <a
-                            href={campaign.telegram_channel_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-cyan-300 underline"
-                          >
-                            Campaign Channel
-                          </a>
-                        ) : null}
-                        {campaign.telegram_group_url ? (
-                          <a
-                            href={campaign.telegram_group_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-cyan-300 underline"
-                          >
-                            Campaign Group
-                          </a>
-                        ) : null}
-                      </div>
-                      <div className="flex justify-between text-sm">
-                      <span className="text-slate-400">
-                        Goal: ETB {campaign.goal_amount.toLocaleString()}
-                      </span>
-                      <span className="text-green-400">
-                        Collected: ETB {campaign.collected_amount.toLocaleString()}
-                      </span>
+                  <div className="space-y-2">
+                    {campaign.description && <p className="text-sm text-slate-300">{campaign.description}</p>}
+                    <div className="flex flex-wrap gap-3 text-xs">
+                      {campaign.telegram_channel_url ? (
+                        <a
+                          href={campaign.telegram_channel_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-cyan-300 underline"
+                        >
+                          Campaign Channel
+                        </a>
+                      ) : null}
+                      {campaign.telegram_group_url ? (
+                        <a
+                          href={campaign.telegram_group_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-cyan-300 underline"
+                        >
+                          Campaign Group
+                        </a>
+                      ) : null}
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-400">Goal: ETB {campaign.goal_amount.toLocaleString()}</span>
+                      <span className="text-green-400">Collected: ETB {campaign.collected_amount.toLocaleString()}</span>
                     </div>
                     <div className="w-full bg-slate-700 rounded-full h-2">
                       <div
                         className="bg-green-500 h-2 rounded-full"
                         style={{
-                          width: `${Math.min(
-                            (campaign.collected_amount / campaign.goal_amount) * 100,
-                            100
-                          )}%`,
+                          width: `${Math.min((campaign.collected_amount / campaign.goal_amount) * 100, 100)}%`,
                         }}
                       />
                     </div>
@@ -447,21 +560,17 @@ export default function CharityPage() {
             ))}
           </div>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'donations' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-semibold">
-              {selectedCampaign
-                ? campaigns.find((c) => c.id === selectedCampaign)?.name
-                : 'All Donations'}
+              {selectedCampaign ? campaigns.find((c) => c.id === selectedCampaign)?.name : 'All Donations'}
             </h2>
             <div className="flex gap-2">
               {selectedCampaign && (
-                <Button
-                  variant="outline"
-                  onClick={() => setSelectedCampaign(null)}
-                  className="text-xs"
-                >
+                <Button variant="outline" onClick={() => setSelectedCampaign(null)} className="text-xs">
                   Clear Filter
                 </Button>
               )}
@@ -493,12 +602,8 @@ export default function CharityPage() {
                         <p className="text-xs text-slate-400">{donation.donor_phone}</p>
                       </div>
                     </td>
-                    <td className="py-3 px-4 font-mono">
-                      ETB {donation.donation_amount.toLocaleString()}
-                    </td>
-                    <td className="py-3 px-4 text-xs font-mono text-slate-400">
-                      {donation.reference_number}
-                    </td>
+                    <td className="py-3 px-4 font-mono">ETB {donation.donation_amount.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-xs font-mono text-slate-400">{donation.reference_number}</td>
                     <td className="py-3 px-4">
                       <span
                         className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
@@ -509,9 +614,7 @@ export default function CharityPage() {
                               : 'bg-yellow-900/50 text-yellow-300'
                         }`}
                       >
-                        {donation.approval_status === 'approved' && (
-                          <CheckCircle className="w-3 h-3" />
-                        )}
+                        {donation.approval_status === 'approved' && <CheckCircle className="w-3 h-3" />}
                         {donation.approval_status === 'rejected' && <XCircle className="w-3 h-3" />}
                         {donation.approval_status}
                       </span>
@@ -559,6 +662,146 @@ export default function CharityPage() {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'promises' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-semibold">Charity Promises</h2>
+            {selectedCampaign && (
+              <Button variant="outline" onClick={() => setSelectedCampaign(null)} className="text-xs">
+                Clear Filter
+              </Button>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-slate-700">
+                <tr>
+                  <th className="text-left py-3 px-4 font-semibold">Campaign</th>
+                  <th className="text-left py-3 px-4 font-semibold">Donor</th>
+                  <th className="text-left py-3 px-4 font-semibold">Type</th>
+                  <th className="text-left py-3 px-4 font-semibold">Value</th>
+                  <th className="text-left py-3 px-4 font-semibold">Due</th>
+                  <th className="text-left py-3 px-4 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {promises.map((row) => (
+                  <tr key={row.id} className="border-b border-slate-700 hover:bg-slate-900/30">
+                    <td className="py-3 px-4 text-slate-200">
+                      {String(row.charity_campaigns?.name || row.campaign_id || '-')}
+                    </td>
+                    <td className="py-3 px-4 text-slate-200">
+                      <div>
+                        <p>{row.donor_name}</p>
+                        <p className="text-xs text-slate-400">{row.donor_phone || '-'}</p>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-slate-200">{String(row.promise_type || '-')}</td>
+                    <td className="py-3 px-4 text-slate-200">
+                      {String(row.promise_type || '').toLowerCase() === 'cash'
+                        ? `ETB ${Number(row.pledged_amount || 0).toFixed(2)}`
+                        : String(row.item_description || '-')}
+                    </td>
+                    <td className="py-3 px-4 text-slate-200">
+                      {row.due_at ? new Date(row.due_at).toLocaleString() : '-'}
+                    </td>
+                    <td className="py-3 px-4 text-slate-200">{String(row.status || '-')}</td>
+                  </tr>
+                ))}
+                {promises.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-4 px-4 text-slate-400">
+                      No promise records found.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'executions' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-semibold">Promise Executions</h2>
+            {selectedCampaign && (
+              <Button variant="outline" onClick={() => setSelectedCampaign(null)} className="text-xs">
+                Clear Filter
+              </Button>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-slate-700">
+                <tr>
+                  <th className="text-left py-3 px-4 font-semibold">Campaign</th>
+                  <th className="text-left py-3 px-4 font-semibold">Donor</th>
+                  <th className="text-left py-3 px-4 font-semibold">Execution</th>
+                  <th className="text-left py-3 px-4 font-semibold">Details</th>
+                  <th className="text-left py-3 px-4 font-semibold">Status</th>
+                  <th className="text-right py-3 px-4 font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {executions.map((row) => {
+                  const status = String(row.approval_status || 'pending').toLowerCase()
+                  return (
+                    <tr key={row.id} className="border-b border-slate-700 hover:bg-slate-900/30">
+                      <td className="py-3 px-4 text-slate-200">
+                        {String(row.charity_campaigns?.name || row.campaign_id || '-')}
+                      </td>
+                      <td className="py-3 px-4 text-slate-200">
+                        <div>
+                          <p>{String(row.charity_promises?.donor_name || '-')}</p>
+                          <p className="text-xs text-slate-400">{String(row.charity_promises?.donor_phone || '-')}</p>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-slate-200">{String(row.execution_type || '-')}</td>
+                      <td className="py-3 px-4 text-slate-200">
+                        {row.in_kind_details
+                          ? `${row.in_kind_details}${row.in_kind_estimated_value ? ` (ETB ${Number(row.in_kind_estimated_value).toFixed(2)})` : ''}`
+                          : row.donation_id || '-'}
+                      </td>
+                      <td className="py-3 px-4 text-slate-200">{status}</td>
+                      <td className="py-3 px-4 text-right">
+                        {status === 'pending' ? (
+                          <div className="flex justify-end gap-1">
+                            <button
+                              onClick={() => approveExecution(row.id)}
+                              className="p-1 rounded hover:bg-green-900/30 text-green-400"
+                              title="Approve"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => rejectExecution(row.id)}
+                              className="p-1 rounded hover:bg-red-900/30 text-red-400"
+                              title="Reject"
+                            >
+                              <XCircle className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-500">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {executions.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-4 px-4 text-slate-400">
+                      No promise execution records found.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>

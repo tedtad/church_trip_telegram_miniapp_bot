@@ -124,6 +124,8 @@ export async function POST(request: NextRequest) {
       receipt_file_url: null,
       receipt_file_name: `manual_sale_${Date.now()}.txt`,
       receipt_hash: receiptHash,
+      manual_sale_admin_id: auth.actor.id,
+      manual_sale_channel: 'admin_manual',
       approval_status: 'approved',
       approval_notes: notes || `Manual sale by ${auth.actor.name || auth.actor.email || auth.actor.id}`,
       approved_at: new Date().toISOString(),

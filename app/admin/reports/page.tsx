@@ -90,6 +90,7 @@ export default function AdminReportsPage() {
             <option value="payment_methods">Payment Method Breakdown</option>
             <option value="ticket_status">Ticket Status Snapshot</option>
             <option value="daily_sales">Daily Approved Sales</option>
+            <option value="manual_cash_by_admin">Manual Cash by Admin</option>
           </select>
           <input
             type="date"
