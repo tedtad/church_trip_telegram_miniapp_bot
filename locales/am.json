@@ -1,0 +1,107 @@
+{
+  "common": {
+    "app_name": "TicketHub",
+    "language": "ቋንቋ",
+    "save": "ይህን ያስቀምጡ",
+    "cancel": "ይቅር",
+    "delete": "ሰርዝ",
+    "edit": "ያርትዑ",
+    "close": "ይዝጉ",
+    "loading": "በመጫን ላይ...",
+    "error": "ስህተት",
+    "success": "ስኬታማ",
+    "back": "ወደ ኋላ",
+    "logout": "ወጡ"
+  },
+  "admin": {
+    "dashboard": "관리자  Dashboard",
+    "login": "አስተዳዳሪ ログイン",
+    "email": "ኢሜል",
+    "password": "ይለፍ ቃል",
+    "sign_in": "ግቤት",
+    "invalid_credentials": "ሳይሆን ኢሜል ወይም ይለፍ ቃል",
+    "welcome": "ወደ ሥርዓተ ሥርዓት ደረጃ እንኳን ደህና መጡ",
+    "overview": "ጠቅላላ እይታ",
+    "tickets": "ቲኬቶች",
+    "customers": "ደንበኞች",
+    "trips": "ጉዞዎች",
+    "analytics": "ትንታኔ",
+    "settings": "ቅንብሮች",
+    "approvals": "ፈቃዶች",
+    "activity_log": "የእንቅስቃሴ ዝርዝር"
+  },
+  "tickets": {
+    "title": "ቲኬቶች",
+    "pending_approvals": "ቅድመ ፈቃድ ተጠብቃለሁ",
+    "approved": "ተቀባይ",
+    "rejected": "ተገንጥሏል",
+    "reference_number": "የማመሳከር ቁጥር",
+    "customer": "ደንበኛ",
+    "trip": "ጉዞ",
+    "amount": "ምንዋ",
+    "payment_method": "የክፍያ ዘዴ",
+    "upload_receipt": "ደረሰኝ ከፋለ",
+    "approve": "ፈቃድ ስጥ",
+    "reject": "ውድቅ ያድርጉ",
+    "serial_number": "ተከታታይ ቁጥር",
+    "ticket_number": "ቲኬት ቁጥር",
+    "status": "ሁኔታ",
+    "view_details": "ዝርዝሮች ይመልከቱ",
+    "quantity": "ብዛት",
+    "price_per_ticket": "ዋጋ በ ቲኬት",
+    "receipt_file": "ደረሰኝ ፋይል"
+  },
+  "customers": {
+    "title": "ደንበኞች",
+    "phone": "ስልክ",
+    "username": "ተጠቃሚ ስም",
+    "joined": "ተቀላቅሏል",
+    "tickets_purchased": "ቲኬቶች ገዝዋል",
+    "total_spent": "ጠቅላላ ከወጡ",
+    "notify": "ማሳወቂያ",
+    "contact": "አግኙ",
+    "language": "ቋንቋ"
+  },
+  "trips": {
+    "title": "ጉዞዎች",
+    "destination": "መድረሻ",
+    "departure": "መውጫ",
+    "arrival": "ብርቅዬ",
+    "price": "ዋጋ",
+    "seats_available": "በጣም ዘንዴ ይገኛሉ",
+    "total_seats": "ጠቅላላ መቀመጫዎች",
+    "create_trip": "ጉዞ ፍጠር",
+    "edit_trip": "ጉዞ ያርትዑ",
+    "trip_name": "የጉዞ ስም",
+    "description": "መግለጫ"
+  },
+  "payment": {
+    "bank": "ባንክ ምልልስ",
+    "cash": "ገንዘብ",
+    "telebirr": "Telebirr",
+    "mobile_money": "ሞባይል ገንዘብ",
+    "method": "የክፍያ ዘዴ",
+    "amount_paid": "የተከፈለ ምንዋ",
+    "currency": "통화"
+  },
+  "notifications": {
+    "ticket_approved": "ቲኬትዎ ፈቅዷል!",
+    "ticket_rejected": "ቲኬትዎ ውድቅ ተደርጓል. ምክንያቱን ያረጋግጡ.",
+    "new_trip": "አዲስ ጉዞ አሁን ይገኛል",
+    "please_check": "ዲጂታል ቲኬትዎን ለ Telegram ያረጋግጡ"
+  },
+  "csv": {
+    "export": "ወደ CSV ላክ",
+    "customers_report": "የደንበኞች ሪፖርት",
+    "tickets_report": "የቲኬቶች ሪፖርት",
+    "activities_report": "የእንቅስቃሴ ሪፖርት",
+    "exporting": "ወደ ውጭ እየላኩ..."
+  },
+  "forms": {
+    "reference_number": "የማመሳከር ቁጥር",
+    "receipt_notes": "ፈቃድ ማስታወሻዎች",
+    "rejection_reason": "ውድቅ ምክንያት",
+    "submit": "ይህን ያስረክቡ",
+    "download_ticket": "ቲኬት ያውርዱ"
+  }
+}

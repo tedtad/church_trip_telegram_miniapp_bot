@@ -1,0 +1,20 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/daily-backup",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/telegram/channel-posts",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/telegram/charity-updates",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/telegram/gnpl-reminders",
+      "schedule": "30 8 * * *"
+    }
+  ]
+}

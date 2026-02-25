@@ -1,0 +1,107 @@
+{
+  "common": {
+    "app_name": "TicketHub",
+    "language": "Language",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "back": "Back",
+    "logout": "Logout"
+  },
+  "admin": {
+    "dashboard": "Admin Dashboard",
+    "login": "Admin Login",
+    "email": "Email",
+    "password": "Password",
+    "sign_in": "Sign In",
+    "invalid_credentials": "Invalid email or password",
+    "welcome": "Welcome to Admin Dashboard",
+    "overview": "Overview",
+    "tickets": "Tickets",
+    "customers": "Customers",
+    "trips": "Trips",
+    "analytics": "Analytics",
+    "settings": "Settings",
+    "approvals": "Approvals",
+    "activity_log": "Activity Log"
+  },
+  "tickets": {
+    "title": "Tickets",
+    "pending_approvals": "Pending Approvals",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "reference_number": "Reference Number",
+    "customer": "Customer",
+    "trip": "Trip",
+    "amount": "Amount",
+    "payment_method": "Payment Method",
+    "upload_receipt": "Upload Receipt",
+    "approve": "Approve",
+    "reject": "Reject",
+    "serial_number": "Serial Number",
+    "ticket_number": "Ticket Number",
+    "status": "Status",
+    "view_details": "View Details",
+    "quantity": "Quantity",
+    "price_per_ticket": "Price per Ticket",
+    "receipt_file": "Receipt File"
+  },
+  "customers": {
+    "title": "Customers",
+    "phone": "Phone",
+    "username": "Username",
+    "joined": "Joined",
+    "tickets_purchased": "Tickets Purchased",
+    "total_spent": "Total Spent",
+    "notify": "Notify",
+    "contact": "Contact",
+    "language": "Language"
+  },
+  "trips": {
+    "title": "Trips",
+    "destination": "Destination",
+    "departure": "Departure",
+    "arrival": "Arrival",
+    "price": "Price",
+    "seats_available": "Seats Available",
+    "total_seats": "Total Seats",
+    "create_trip": "Create Trip",
+    "edit_trip": "Edit Trip",
+    "trip_name": "Trip Name",
+    "description": "Description"
+  },
+  "payment": {
+    "bank": "Bank Transfer",
+    "cash": "Cash",
+    "telebirr": "Telebirr",
+    "mobile_money": "Mobile Money",
+    "method": "Payment Method",
+    "amount_paid": "Amount Paid",
+    "currency": "Currency"
+  },
+  "notifications": {
+    "ticket_approved": "Your ticket has been approved!",
+    "ticket_rejected": "Your ticket was rejected. Please check the reason.",
+    "new_trip": "A new trip is now available",
+    "please_check": "Please check Telegram for your digital ticket"
+  },
+  "csv": {
+    "export": "Export to CSV",
+    "customers_report": "Customers Report",
+    "tickets_report": "Tickets Report",
+    "activities_report": "Activities Report",
+    "exporting": "Exporting..."
+  },
+  "forms": {
+    "reference_number": "Reference Number",
+    "receipt_notes": "Approval Notes",
+    "rejection_reason": "Rejection Reason",
+    "submit": "Submit",
+    "download_ticket": "Download Ticket"
+  }
+}
