@@ -151,6 +151,13 @@ function normalizePhoneInput(value: string) {
   return String(value || '').replace(/[^\d+]/g, '');
 }
 
+function normalizeDiscountCodeInput(value: string) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '');
+}
+
 function isExpiredByDeparture(dateValue?: string | null) {
   if (!dateValue) return false;
   const date = new Date(dateValue);
@@ -227,6 +234,8 @@ export default function MiniAppPage() {
   const [methodByTrip, setMethodByTrip] = useState<Record<string, PaymentMethod>>({});
   const [quantityByTrip, setQuantityByTrip] = useState<Record<string, number>>({});
   const [discountCodeByTrip, setDiscountCodeByTrip] = useState<Record<string, string>>({});
+  const [pendingInviteCode, setPendingInviteCode] = useState('');
+  const [pendingInviteTripId, setPendingInviteTripId] = useState('');
   const [manualFlow, setManualFlow] = useState<ManualFlow | null>(null);
   const [miniAppSettings, setMiniAppSettings] = useState<MiniAppSettings | null>(null);
   const [transferInputs, setTransferInputs] = useState<Record<string, { phone: string; name: string }>>({});
@@ -652,6 +661,15 @@ export default function MiniAppPage() {
 
     const params = new URLSearchParams(window.location.search);
     const fromQuery = String(params.get('initData') || params.get('tgWebAppData') || '').trim();
+    const inviteCode = normalizeDiscountCodeInput(
+      String(params.get('discountCode') || params.get('inviteCode') || params.get('invitationCode') || '')
+    );
+    const inviteTripId = String(params.get('tripId') || '').trim();
+
+    if (inviteCode) {
+      setPendingInviteCode(inviteCode);
+      setPendingInviteTripId(inviteTripId);
+    }
 
     const resolveFromTelegram = () => {
       const tg = window.Telegram?.WebApp;
@@ -698,6 +716,32 @@ export default function MiniAppPage() {
     if (!initData) return;
     loadData();
   }, [initData, loadData]);
+
+  useEffect(() => {
+    if (!pendingInviteCode || trips.length === 0) return;
+
+    setDiscountCodeByTrip((prev) => {
+      const next = { ...prev };
+      const tripMatched = pendingInviteTripId && trips.some((trip) => trip.id === pendingInviteTripId);
+      if (tripMatched) {
+        next[pendingInviteTripId] = pendingInviteCode;
+        return next;
+      }
+      if (pendingInviteTripId) {
+        return next;
+      }
+
+      for (const trip of trips) {
+        if (!next[trip.id]) {
+          next[trip.id] = pendingInviteCode;
+        }
+      }
+      return next;
+    });
+
+    setPendingInviteCode('');
+    setPendingInviteTripId('');
+  }, [pendingInviteCode, pendingInviteTripId, trips]);
 
   const username = useMemo(() => {
     if (!user) return '';

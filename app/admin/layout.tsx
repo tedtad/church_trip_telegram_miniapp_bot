@@ -71,6 +71,29 @@ export default function AdminLayout({
     { icon: Settings, label: 'Settings', href: '/admin/settings', permission: 'settings_manage' },
   ];
   const visibleNavItems = navItems.filter((item) => hasAdminPermission(adminRole, item.permission));
+  const routePermissions: Array<{ prefix: string; permission: AdminPermission }> = [
+    { prefix: '/admin/dashboard', permission: 'dashboard_view' },
+    { prefix: '/admin/tickets', permission: 'tickets_review' },
+    { prefix: '/admin/checkin', permission: 'tickets_checkin' },
+    { prefix: '/admin/customers', permission: 'customers_view' },
+    { prefix: '/admin/trips', permission: 'trips_manage' },
+    { prefix: '/admin/analytics', permission: 'analytics_view' },
+    { prefix: '/admin/gnpl', permission: 'tickets_review' },
+    { prefix: '/admin/discount-codes', permission: 'discounts_manage' },
+    { prefix: '/admin/charity', permission: 'charity_manage' },
+    { prefix: '/admin/invitations', permission: 'invitations_manage' },
+    { prefix: '/admin/bulk-operations', permission: 'bulk_ops_manage' },
+    { prefix: '/admin/bot', permission: 'bot_manage' },
+    { prefix: '/admin/backups', permission: 'backups_manage' },
+    { prefix: '/admin/reconciliation', permission: 'reconciliation_view' },
+    { prefix: '/admin/reports', permission: 'reports_view' },
+    { prefix: '/admin/users', permission: 'admin_users_manage' },
+    { prefix: '/admin/settings', permission: 'settings_manage' },
+  ];
+  const currentRoutePermission =
+    routePermissions.find((item) => pathname?.startsWith(item.prefix))?.permission || null;
+  const canAccessCurrentRoute = !currentRoutePermission || hasAdminPermission(adminRole, currentRoutePermission);
+  const fallbackRoute = visibleNavItems[0]?.href || '/admin/login';
 
   const handleLogout = async () => {
     await adminLogout();
@@ -166,7 +189,22 @@ export default function AdminLayout({
 
         {/* Page Content */}
         <main className="flex-1 overflow-auto bg-slate-900 p-6">
-          {children}
+          {canAccessCurrentRoute ? (
+            children
+          ) : (
+            <div className="mx-auto max-w-xl rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-100">
+              <h3 className="text-lg font-semibold">Access denied</h3>
+              <p className="mt-2 text-sm text-slate-300">
+                Your role does not have permission to open this page.
+              </p>
+              <a
+                href={fallbackRoute}
+                className="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-white"
+              >
+                Go to allowed page
+              </a>
+            </div>
+          )}
         </main>
       </div>
 

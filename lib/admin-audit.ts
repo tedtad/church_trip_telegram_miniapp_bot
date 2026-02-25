@@ -26,25 +26,34 @@ export async function resolveAdminId(
   if (queryAdminId) return queryAdminId;
 
   try {
-    const { data: activeAdmin } = await supabase
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const authEmail = String(user?.email || '').trim().toLowerCase();
+    if (authEmail) {
+      const { data: currentAdmin } = await supabase
+        .from('admin_users')
+        .select('id, is_active')
+        .eq('email', authEmail)
+        .maybeSingle();
+      if (currentAdmin?.id && currentAdmin?.is_active !== false) {
+        return String(currentAdmin.id);
+      }
+    }
+
+    const { data: byAuthUserId } = await supabase
       .from('admin_users')
-      .select('id')
-      .eq('is_active', true)
-      .limit(1)
+      .select('id, is_active')
+      .eq('id', String(user?.id || ''))
       .maybeSingle();
-
-    if (activeAdmin?.id) return String(activeAdmin.id);
-
-    const { data: anyAdmin } = await supabase
-      .from('admin_users')
-      .select('id')
-      .limit(1)
-      .maybeSingle();
-
-    return anyAdmin?.id ? String(anyAdmin.id) : null;
+    if (byAuthUserId?.id && byAuthUserId?.is_active !== false) {
+      return String(byAuthUserId.id);
+    }
   } catch {
-    return null;
+    // fall through
   }
+
+  return null;
 }
 
 export async function writeAdminAuditLog(supabase: any, input: AuditInput) {

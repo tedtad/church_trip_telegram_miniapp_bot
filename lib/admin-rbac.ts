@@ -114,6 +114,34 @@ export function hasAdminPermission(roleInput: unknown, permission: AdminPermissi
   return permissions.includes(permission);
 }
 
+export function resolvePermissionForAdminApi(pathnameInput: string): AdminPermission | null {
+  const pathname = String(pathnameInput || '').replace(/\/+$/, '');
+  if (!pathname.startsWith('/api/admin')) return null;
+
+  if (pathname === '/api/admin/analytics') return 'analytics_view';
+  if (pathname === '/api/admin/gnpl') return 'tickets_review';
+  if (pathname === '/api/admin/reports') return 'reports_view';
+  if (pathname === '/api/admin/reconciliation') return 'reconciliation_view';
+  if (pathname === '/api/admin/reconciliation/match') return 'reconciliation_view';
+  if (pathname === '/api/admin/users') return 'admin_users_manage';
+  if (pathname === '/api/admin/trips') return 'trips_manage';
+  if (pathname === '/api/admin/settings') return 'settings_manage';
+  if (pathname === '/api/admin/settings/upload-logo') return 'settings_manage';
+  if (pathname === '/api/admin/receipt-intelligence/samples') return 'settings_manage';
+  if (pathname === '/api/admin/tickets/checkin') return 'tickets_checkin';
+  if (pathname === '/api/admin/tickets/decision') return 'tickets_review';
+  if (pathname === '/api/admin/tickets/manual-sale') return 'tickets_manual_sale';
+  if (pathname.startsWith('/api/admin/discount-codes')) return 'discounts_manage';
+  if (pathname.startsWith('/api/admin/invitations')) return 'invitations_manage';
+  if (pathname.startsWith('/api/admin/charity')) return 'charity_manage';
+  if (pathname.startsWith('/api/admin/backups')) return 'backups_manage';
+  if (pathname.startsWith('/api/admin/bulk-operations')) return 'bulk_ops_manage';
+  if (pathname.startsWith('/api/admin/bot')) return 'bot_manage';
+  if (pathname.startsWith('/api/admin/telebirr')) return 'settings_manage';
+
+  return null;
+}
+
 export function extractAdminIdFromRequest(request: any, explicitAdminId?: string | null) {
   const explicit = String(explicitAdminId || '').trim();
   if (explicit) return explicit;

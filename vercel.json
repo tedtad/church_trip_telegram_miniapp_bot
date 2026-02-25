@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/telegram/channel-posts",
-      "schedule": "0 */6 * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/cron/telegram/charity-updates",

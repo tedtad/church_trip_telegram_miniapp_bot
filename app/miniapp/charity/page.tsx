@@ -90,9 +90,18 @@ function resolveInitDataFromPage() {
   return fromTg || fromQuery;
 }
 
+function normalizeDiscountCodeInput(value: string) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '');
+}
+
 export default function CharityPage() {
   const [lang, setLang] = useState<Lang>('am');
   const [initData, setInitData] = useState('');
+  const [invitationCode, setInvitationCode] = useState('');
+  const [campaignHintId, setCampaignHintId] = useState('');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [donation, setDonation] = useState<DonationStep>({
@@ -136,6 +145,13 @@ export default function CharityPage() {
   useEffect(() => {
     const resolved = resolveInitDataFromPage();
     setInitData(resolved);
+    const params = new URLSearchParams(window.location.search);
+    setInvitationCode(
+      normalizeDiscountCodeInput(
+        String(params.get('invitationCode') || params.get('discountCode') || params.get('inviteCode') || '')
+      )
+    );
+    setCampaignHintId(String(params.get('campaignId') || params.get('campaign') || '').trim());
 
     const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
     if (tgUser) {
@@ -150,6 +166,19 @@ export default function CharityPage() {
   useEffect(() => {
     loadCampaigns();
   }, [loadCampaigns]);
+
+  useEffect(() => {
+    if (!campaignHintId || campaigns.length === 0) return;
+    const matched = campaigns.find((campaign) => campaign.id === campaignHintId);
+    if (!matched) return;
+    setDonation((prev) => ({
+      ...prev,
+      step: 2,
+      campaignId: matched.id,
+      campaignName: matched.name,
+    }));
+    setCampaignHintId('');
+  }, [campaignHintId, campaigns]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -173,6 +202,7 @@ export default function CharityPage() {
       formData.append('donationAmount', donation.donationAmount);
       formData.append('referenceNumber', donation.referenceNumber);
       if (initData) formData.append('initData', initData);
+      if (invitationCode) formData.append('invitationCode', invitationCode);
       if (donation.receipt) {
         formData.append('receipt', donation.receipt);
       }
@@ -317,6 +347,11 @@ export default function CharityPage() {
               <p className="text-sm font-medium text-slate-300">
                 Campaign: <span className="text-white">{donation.campaignName}</span>
               </p>
+              {invitationCode ? (
+                <p className="text-xs text-slate-400 mt-1">
+                  Invitation code: <span className="font-mono text-slate-200">{invitationCode}</span>
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-4">
