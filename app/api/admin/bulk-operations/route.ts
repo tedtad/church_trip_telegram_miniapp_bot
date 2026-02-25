@@ -1,20 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { sendBulkNotifications } from '@/lib/notifications'
-
-async function getFallbackAdminId(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data } = await supabase
-    .from('admin_users')
-    .select('id')
-    .eq('is_active', true)
-    .limit(1)
-    .maybeSingle()
-
-  return data?.id || null
-}
+import { requireAdminPermission } from '@/lib/admin-rbac'
 
 async function createBulkOperationLog(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: any,
   adminId: string | null,
   operationType: string,
   targetCount: number
@@ -55,9 +45,17 @@ async function createBulkOperationLog(
   return actionTypeRes
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'bulk_ops_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+    }
     const { data, error } = await supabase
       .from('activity_logs')
       .select('*')
@@ -120,8 +118,16 @@ export async function POST(request: NextRequest) {
       .map((line) => parseInt(line.split(',')[0]))
       .filter((id) => !isNaN(id))
 
-    const supabase = await createClient()
-    const adminId = await getFallbackAdminId(supabase)
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'bulk_ops_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+    }
+    const adminId = auth.actor.id
 
     // Create operation record
     const { data: operation, error: opError } = await createBulkOperationLog(
@@ -202,7 +208,15 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    const supabase = await createClient()
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'bulk_ops_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+    }
     const { error } = await supabase
       .from('activity_logs')
       .delete()

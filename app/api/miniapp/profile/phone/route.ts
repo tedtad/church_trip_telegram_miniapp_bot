@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { verifyTelegramMiniAppInitData } from '@/lib/telegram-miniapp';
+import { getMiniAppMaintenanceMessage, getMiniAppRuntimeSettings } from '@/lib/miniapp-access';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -38,6 +39,21 @@ function normalizePhoneNumber(raw: unknown) {
   return compact;
 }
 
+function normalizeName(raw: unknown) {
+  return String(raw || '')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function splitName(fullName: string) {
+  const normalized = normalizeName(fullName);
+  if (!normalized) return { firstName: '', lastName: null as string | null };
+  const parts = normalized.split(' ');
+  const firstName = parts.shift() || '';
+  const lastName = parts.length ? parts.join(' ') : null;
+  return { firstName, lastName };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
@@ -48,6 +64,7 @@ export async function POST(request: NextRequest) {
     }
 
     const phoneNumber = normalizePhoneNumber(body?.phoneNumber);
+    const customerName = normalizeName(body?.customerName);
     if (!phoneNumber) {
       return NextResponse.json(
         { ok: false, error: 'Valid phone number is required (digits, optional +).' },
@@ -56,17 +73,44 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await getPrimaryClient();
+    const appSettings = await getMiniAppRuntimeSettings(client);
+    if (appSettings.maintenanceMode) {
+      return NextResponse.json(
+        { ok: false, error: 'MINIAPP_MAINTENANCE', message: getMiniAppMaintenanceMessage(appSettings) },
+        { status: 503 }
+      );
+    }
+
+    const { firstName, lastName } = splitName(customerName);
     const now = new Date().toISOString();
     const payloads = [
-      { id: auth.user.id, phone_number: phoneNumber, last_activity: now, last_interaction: now },
-      { id: auth.user.id, phone_number: phoneNumber, last_activity: now },
-      { id: auth.user.id, phone_number: phoneNumber },
+      {
+        id: auth.user.id,
+        phone_number: phoneNumber,
+        ...(firstName ? { first_name: firstName } : {}),
+        ...(lastName !== null ? { last_name: lastName } : {}),
+        last_activity: now,
+        last_interaction: now,
+      },
+      {
+        id: auth.user.id,
+        phone_number: phoneNumber,
+        ...(firstName ? { first_name: firstName } : {}),
+        ...(lastName !== null ? { last_name: lastName } : {}),
+        last_activity: now,
+      },
+      {
+        id: auth.user.id,
+        phone_number: phoneNumber,
+        ...(firstName ? { first_name: firstName } : {}),
+        ...(lastName !== null ? { last_name: lastName } : {}),
+      },
     ];
 
     for (const payload of payloads) {
       const result = await client.from('telegram_users').upsert(payload, { onConflict: 'id' });
       if (!result.error) {
-        return NextResponse.json({ ok: true, phoneNumber });
+        return NextResponse.json({ ok: true, phoneNumber, customerName });
       }
     }
 
@@ -76,4 +120,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });
   }
 }
-

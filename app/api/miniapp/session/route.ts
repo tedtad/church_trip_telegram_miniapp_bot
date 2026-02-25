@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { verifyTelegramMiniAppInitData } from '@/lib/telegram-miniapp';
+import { getMiniAppMaintenanceMessage, getMiniAppRuntimeSettings } from '@/lib/miniapp-access';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -41,44 +42,31 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await getPrimaryClient();
+    const appSettings = await getMiniAppRuntimeSettings(client);
+    if (appSettings.maintenanceMode) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'MINIAPP_MAINTENANCE',
+          message: getMiniAppMaintenanceMessage(appSettings),
+          appSettings: {
+            appName: appSettings.appName,
+            maintenanceMode: true,
+            maintenanceMessage: getMiniAppMaintenanceMessage(appSettings),
+            charityEnabled: appSettings.charityEnabled,
+            discountEnabled: appSettings.discountEnabled,
+          },
+        },
+        { status: 503 }
+      );
+    }
+
     const now = new Date().toISOString();
     const { data: existingUser } = await client
       .from('telegram_users')
       .select('language_code, phone_number')
       .eq('id', auth.user.id)
       .maybeSingle();
-
-    let appSettings: {
-      telegramChannelUrl: string;
-      telegramChannelName: string;
-      gnplEnabled: boolean;
-      gnplRequireAdminApproval: boolean;
-      gnplDefaultTermDays: number;
-      gnplPenaltyEnabled: boolean;
-      gnplPenaltyPercent: number;
-      gnplPenaltyPeriodDays: number;
-    } | null = null;
-    {
-      const settingsResult = await client
-        .from('app_settings')
-        .select(
-          'telegram_channel_url, telegram_channel_name, gnpl_enabled, gnpl_require_admin_approval, gnpl_default_term_days, gnpl_penalty_enabled, gnpl_penalty_percent, gnpl_penalty_period_days'
-        )
-        .eq('id', 'default')
-        .maybeSingle();
-      if (!settingsResult.error && settingsResult.data) {
-        appSettings = {
-          telegramChannelUrl: String((settingsResult.data as any).telegram_channel_url || '').trim(),
-          telegramChannelName: String((settingsResult.data as any).telegram_channel_name || '').trim(),
-          gnplEnabled: Boolean((settingsResult.data as any).gnpl_enabled),
-          gnplRequireAdminApproval: (settingsResult.data as any).gnpl_require_admin_approval !== false,
-          gnplDefaultTermDays: Math.max(1, Number((settingsResult.data as any).gnpl_default_term_days || 14)),
-          gnplPenaltyEnabled: (settingsResult.data as any).gnpl_penalty_enabled !== false,
-          gnplPenaltyPercent: Math.max(0, Number((settingsResult.data as any).gnpl_penalty_percent || 0)),
-          gnplPenaltyPeriodDays: Math.max(1, Number((settingsResult.data as any).gnpl_penalty_period_days || 7)),
-        };
-      }
-    }
     const existingLang = String(existingUser?.language_code || '').trim().toLowerCase();
     const lang =
       existingLang === 'am' || existingLang === 'en'
@@ -129,7 +117,21 @@ export async function POST(request: NextRequest) {
         phoneNumber: String(existingUser?.phone_number || '').trim(),
         languageCode: lang,
       },
-      appSettings,
+      appSettings: {
+        appName: appSettings.appName,
+        telegramChannelUrl: appSettings.telegramChannelUrl,
+        telegramChannelName: appSettings.telegramChannelName,
+        gnplEnabled: appSettings.gnplEnabled,
+        gnplRequireAdminApproval: appSettings.gnplRequireAdminApproval,
+        gnplDefaultTermDays: appSettings.gnplDefaultTermDays,
+        gnplPenaltyEnabled: appSettings.gnplPenaltyEnabled,
+        gnplPenaltyPercent: appSettings.gnplPenaltyPercent,
+        gnplPenaltyPeriodDays: appSettings.gnplPenaltyPeriodDays,
+        maintenanceMode: appSettings.maintenanceMode,
+        maintenanceMessage: appSettings.maintenanceMessage,
+        charityEnabled: appSettings.charityEnabled,
+        discountEnabled: appSettings.discountEnabled,
+      },
     });
   } catch (error) {
     console.error('[miniapp-session] Error:', error);

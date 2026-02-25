@@ -3,12 +3,108 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { hasAdminPermission, normalizeAdminRole, resolvePermissionForAdminApi } from '@/lib/admin-rbac'
 import { enforceRequestRateLimit, extractClientIp } from '@/lib/request-rate-limit'
 
+const ADMIN_SESSION_COOKIE_NAME = 'th_admin_session'
+
+function getAdminSessionSecret() {
+  const secret =
+    String(process.env.ADMIN_SESSION_SECRET || '').trim() ||
+    String(process.env.NEXTAUTH_SECRET || '').trim() ||
+    String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+  return secret.length >= 24 ? secret : ''
+}
+
+function toBase64(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padding = normalized.length % 4
+  if (!padding) return normalized
+  return normalized + '='.repeat(4 - padding)
+}
+
+function decodeBase64Url(value: string) {
+  const decoded = atob(toBase64(value))
+  const bytes = new Uint8Array(decoded.length)
+  for (let i = 0; i < decoded.length; i += 1) {
+    bytes[i] = decoded.charCodeAt(i)
+  }
+  return new TextDecoder().decode(bytes)
+}
+
+function encodeBase64Url(bytes: Uint8Array) {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+async function hmacSha256Base64Url(value: string, secret: string) {
+  const keyData = new TextEncoder().encode(secret)
+  const key = await globalThis.crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const signatureBuffer = await globalThis.crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(value),
+  )
+  return encodeBase64Url(new Uint8Array(signatureBuffer))
+}
+
+function getCookieValue(request: NextRequest, name: string) {
+  const value = request.cookies.get(name)?.value
+  if (value) return value
+  const cookieHeader = String(request.headers.get('cookie') || '')
+  if (!cookieHeader) return ''
+  const pairs = cookieHeader.split(';')
+  for (const pair of pairs) {
+    const [key, ...rest] = pair.split('=')
+    if (String(key || '').trim() !== name) continue
+    return decodeURIComponent(rest.join('='))
+  }
+  return ''
+}
+
+async function verifyAdminSessionFromRequest(request: NextRequest) {
+  const token = String(getCookieValue(request, ADMIN_SESSION_COOKIE_NAME) || '').trim()
+  if (!token) return null
+  const secret = getAdminSessionSecret()
+  if (!secret) return null
+
+  const parts = token.split('.')
+  if (parts.length !== 2) return null
+  const [encodedPayload, signature] = parts
+  const expected = await hmacSha256Base64Url(encodedPayload, secret)
+  if (expected !== signature) return null
+
+  try {
+    const payload = JSON.parse(decodeBase64Url(encodedPayload)) as {
+      adminId?: string
+      exp?: number
+    }
+    const adminId = String(payload.adminId || '').trim()
+    const exp = Number(payload.exp || 0)
+    if (!adminId || !Number.isFinite(exp)) return null
+    const now = Math.floor(Date.now() / 1000)
+    if (exp <= now) return null
+    return { adminId }
+  } catch {
+    return null
+  }
+}
+
 export async function proxy(request: NextRequest) {
   return updateSession(request)
 }
 
 async function updateSession(request: NextRequest) {
   const requestHeaders = new Headers(request.headers)
+  const incomingRequestId = String(request.headers.get('x-request-id') || '').trim()
+  const requestId = incomingRequestId || globalThis.crypto.randomUUID()
+  requestHeaders.set('x-request-id', requestId)
 
   let supabaseResponse = NextResponse.next({
     request: {
@@ -67,62 +163,86 @@ async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const pathname = request.nextUrl.pathname
+  const isAdminAuthRoute = pathname.startsWith('/api/admin/auth/')
 
   if (pathname.startsWith('/api/admin')) {
-    const requiredPermission = resolvePermissionForAdminApi(pathname)
-    if (!requiredPermission) {
-      return NextResponse.json(
-        { ok: false, error: 'Admin API route permission is not configured.' },
-        { status: 403 },
-      )
-    }
-
-    if (!user?.email) {
-      return NextResponse.json({ ok: false, error: 'Unauthorized admin request.' }, { status: 401 })
-    }
-
-    let adminActor: { id: string; role: string; is_active: boolean } | null = null
-    const byEmail = await supabase
-      .from('admin_users')
-      .select('id, role, is_active')
-      .eq('email', user.email)
-      .maybeSingle()
-
-    if (byEmail.data) {
-      adminActor = {
-        id: String(byEmail.data.id),
-        role: normalizeAdminRole(byEmail.data.role),
-        is_active: Boolean(byEmail.data.is_active),
+    if (!isAdminAuthRoute) {
+      const requiredPermission = resolvePermissionForAdminApi(pathname)
+      if (!requiredPermission) {
+        return NextResponse.json(
+          { ok: false, error: 'Admin API route permission is not configured.' },
+          { status: 403 },
+        )
       }
-    } else {
-      const byId = await supabase
-        .from('admin_users')
-        .select('id, role, is_active')
-        .eq('id', user.id)
-        .maybeSingle()
-      if (byId.data) {
-        adminActor = {
-          id: String(byId.data.id),
-          role: normalizeAdminRole(byId.data.role),
-          is_active: Boolean(byId.data.is_active),
+
+      let adminActor: { id: string; role: string; is_active: boolean } | null = null
+      const claims = await verifyAdminSessionFromRequest(request)
+      if (claims?.adminId) {
+        const bySession = await supabase
+          .from('admin_users')
+          .select('id, role, is_active')
+          .eq('id', claims.adminId)
+          .maybeSingle()
+
+        if (bySession.data) {
+          adminActor = {
+            id: String(bySession.data.id),
+            role: normalizeAdminRole(bySession.data.role),
+            is_active: Boolean(bySession.data.is_active),
+          }
         }
       }
-    }
 
-    if (!adminActor || !adminActor.is_active) {
-      return NextResponse.json(
-        { ok: false, error: 'Admin account is inactive or not registered.' },
-        { status: 403 },
-      )
-    }
+      if (!adminActor && user?.email) {
+        const byEmail = await supabase
+          .from('admin_users')
+          .select('id, role, is_active')
+          .eq('email', user.email)
+          .maybeSingle()
 
-    if (!hasAdminPermission(adminActor.role, requiredPermission)) {
-      return NextResponse.json({ ok: false, error: 'Insufficient role permission.' }, { status: 403 })
-    }
+        if (byEmail.data) {
+          adminActor = {
+            id: String(byEmail.data.id),
+            role: normalizeAdminRole(byEmail.data.role),
+            is_active: Boolean(byEmail.data.is_active),
+          }
+        }
+      }
 
-    requestHeaders.set('x-admin-id', adminActor.id)
-    requestHeaders.set('x-admin-role', adminActor.role)
-    rebuildResponse()
+      if (!adminActor && user?.id) {
+        const byId = await supabase
+          .from('admin_users')
+          .select('id, role, is_active')
+          .eq('id', user.id)
+          .maybeSingle()
+        if (byId.data) {
+          adminActor = {
+            id: String(byId.data.id),
+            role: normalizeAdminRole(byId.data.role),
+            is_active: Boolean(byId.data.is_active),
+          }
+        }
+      }
+
+      if (!adminActor) {
+        return NextResponse.json({ ok: false, error: 'Unauthorized admin request.' }, { status: 401 })
+      }
+
+      if (!adminActor.is_active) {
+        return NextResponse.json(
+          { ok: false, error: 'Admin account is inactive or not registered.' },
+          { status: 403 },
+        )
+      }
+
+      if (!hasAdminPermission(adminActor.role, requiredPermission)) {
+        return NextResponse.json({ ok: false, error: 'Insufficient role permission.' }, { status: 403 })
+      }
+
+      requestHeaders.set('x-admin-id', adminActor.id)
+      requestHeaders.set('x-admin-role', adminActor.role)
+      rebuildResponse()
+    }
   }
 
   if (
@@ -160,6 +280,8 @@ async function updateSession(request: NextRequest) {
     supabaseResponse.headers.set('X-RateLimit-Remaining', String(rate.remaining))
     supabaseResponse.headers.set('X-RateLimit-Reset', String(Math.floor(rate.resetAt / 1000)))
   }
+
+  supabaseResponse.headers.set('x-request-id', requestId)
 
   if (
     // if the user is not logged in and the app path, in this case, /protected, is accessed, redirect to the login page

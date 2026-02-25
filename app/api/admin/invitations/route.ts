@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { resolveAdminId, writeAdminAuditLog } from '@/lib/admin-audit';
+import { writeAdminAuditLog } from '@/lib/admin-audit';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 
 function detectMissingColumn(error: unknown): string | null {
   const message = String((error as any)?.message || '');
@@ -45,6 +46,14 @@ async function loadInvitationsWithFallback(supabase: any, statusFilter: string) 
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'invitations_manage',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, success: false, error: auth.error }, { status: auth.status });
+    }
     const statusFilter = String(request.nextUrl.searchParams.get('status') || 'all')
       .trim()
       .toLowerCase();
@@ -75,7 +84,15 @@ export async function DELETE(request: NextRequest) {
     }
 
     const supabase = await createAdminClient();
-    const adminId = await resolveAdminId(supabase, request, null);
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'invitations_manage',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, success: false, error: auth.error }, { status: auth.status });
+    }
+    const adminId = auth.actor.id;
     const { data: invitation } = await supabase
       .from('invitations')
       .select('id, invitation_code, is_active, current_uses, used_count, max_uses')

@@ -14,16 +14,21 @@ export async function resolveAdminId(
   request?: NextRequest,
   explicitAdminId?: string | null
 ): Promise<string | null> {
-  const normalizedExplicit = String(explicitAdminId || '').trim();
-  if (normalizedExplicit) return normalizedExplicit;
+  try {
+    const { getAdminSessionTokenFromRequest, verifyAdminSessionToken } = await import('@/lib/admin-session');
+    const claims = verifyAdminSessionToken(getAdminSessionTokenFromRequest(request as any));
+    if (claims?.adminId) return String(claims.adminId);
+  } catch {
+    // fall through
+  }
 
   const headerAdminId = String(
     request?.headers.get('x-admin-id') || request?.headers.get('x-admin-user-id') || ''
   ).trim();
   if (headerAdminId) return headerAdminId;
 
-  const queryAdminId = String(request?.nextUrl.searchParams.get('adminId') || '').trim();
-  if (queryAdminId) return queryAdminId;
+  const normalizedExplicit = String(explicitAdminId || '').trim();
+  if (normalizedExplicit && normalizedExplicit === headerAdminId) return normalizedExplicit;
 
   try {
     const {

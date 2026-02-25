@@ -25,6 +25,35 @@ export type AdminPermission =
   | 'reconciliation_view'
   | 'reports_view';
 
+export const ADMIN_ROLES: ReadonlyArray<AdminRole> = [
+  'system_admin',
+  'admin',
+  'moderator',
+  'analyst',
+  'sales_agent',
+  'user',
+];
+
+export const ADMIN_PERMISSIONS: ReadonlyArray<AdminPermission> = [
+  'dashboard_view',
+  'tickets_review',
+  'tickets_checkin',
+  'tickets_manual_sale',
+  'customers_view',
+  'trips_manage',
+  'analytics_view',
+  'discounts_manage',
+  'charity_manage',
+  'invitations_manage',
+  'bulk_ops_manage',
+  'bot_manage',
+  'backups_manage',
+  'settings_manage',
+  'admin_users_manage',
+  'reconciliation_view',
+  'reports_view',
+];
+
 const ROLE_PERMISSION_MAP: Record<AdminRole, ReadonlyArray<AdminPermission>> = {
   system_admin: [
     'dashboard_view',
@@ -114,6 +143,11 @@ export function hasAdminPermission(roleInput: unknown, permission: AdminPermissi
   return permissions.includes(permission);
 }
 
+export function getAdminPermissionsForRole(roleInput: unknown): ReadonlyArray<AdminPermission> {
+  const role = normalizeAdminRole(roleInput);
+  return ROLE_PERMISSION_MAP[role] || [];
+}
+
 export function resolvePermissionForAdminApi(pathnameInput: string): AdminPermission | null {
   const pathname = String(pathnameInput || '').replace(/\/+$/, '');
   if (!pathname.startsWith('/api/admin')) return null;
@@ -143,16 +177,16 @@ export function resolvePermissionForAdminApi(pathnameInput: string): AdminPermis
 }
 
 export function extractAdminIdFromRequest(request: any, explicitAdminId?: string | null) {
-  const explicit = String(explicitAdminId || '').trim();
-  if (explicit) return explicit;
   const fromHeader = String(
     request?.headers?.get?.('x-admin-id') ||
       request?.headers?.get?.('x-admin-user-id') ||
       ''
   ).trim();
   if (fromHeader) return fromHeader;
-  const fromQuery = String(request?.nextUrl?.searchParams?.get?.('adminId') || '').trim();
-  if (fromQuery) return fromQuery;
+
+  const explicit = String(explicitAdminId || '').trim();
+  if (explicit) return explicit;
+
   return '';
 }
 
@@ -180,7 +214,21 @@ export async function requireAdminPermission(params: {
   permission: AdminPermission;
   explicitAdminId?: string | null;
 }) {
-  const adminId = extractAdminIdFromRequest(params.request, params.explicitAdminId);
+  let adminId = '';
+  try {
+    const { getAdminSessionTokenFromRequest, verifyAdminSessionToken } = await import('@/lib/admin-session');
+    const claims = verifyAdminSessionToken(getAdminSessionTokenFromRequest(params.request));
+    if (claims?.adminId) {
+      adminId = String(claims.adminId);
+    }
+  } catch {
+    // ignore and continue with proxy-injected headers fallback
+  }
+
+  if (!adminId) {
+    adminId = extractAdminIdFromRequest(params.request, params.explicitAdminId);
+  }
+
   if (!adminId) {
     return { ok: false as const, status: 401, error: 'Admin identity is required' };
   }

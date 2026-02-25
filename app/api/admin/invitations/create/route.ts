@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveAdminId, writeAdminAuditLog } from '@/lib/admin-audit'
+import { writeAdminAuditLog } from '@/lib/admin-audit'
 import { generateQRCodeDataURL } from '@/lib/qr-code'
 import { normalizeDiscountCode } from '@/lib/discount-vouchers'
+import { requireAdminPermission } from '@/lib/admin-rbac'
 
 function isMissingColumn(error: unknown, columnName: string) {
   const message = String((error as any)?.message || '').toLowerCase()
@@ -10,7 +11,6 @@ function isMissingColumn(error: unknown, columnName: string) {
 }
 
 type CreateDiscountInput = {
-  adminId?: string
   invitationCode?: string
   tripId?: string | null
   maxUses?: number | null
@@ -33,7 +33,15 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json().catch(() => ({}))) as CreateDiscountInput
     const supabase = await createAdminClient()
-    const adminId = await resolveAdminId(supabase, request, body.adminId || null)
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'invitations_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+    }
+    const adminId = auth.actor.id
 
     // Generate unique invitation code
     const providedCode = normalizeDiscountCode(body.invitationCode)

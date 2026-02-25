@@ -15,9 +15,11 @@ const DEFAULT_SETTINGS = {
   smtp_enabled: false,
   sms_enabled: false,
   telegram_notifications_enabled: true,
-  two_factor_enabled: false,
+  two_factor_enabled: true,
   maintenance_mode: false,
   maintenance_message: null as string | null,
+  charity_enabled: true,
+  discount_enabled: true,
   telegram_channel_chat_id: null as string | null,
   telegram_channel_url: null as string | null,
   telegram_channel_name: null as string | null,
@@ -58,6 +60,8 @@ const UPDATABLE_FIELDS = new Set([
   'two_factor_enabled',
   'maintenance_mode',
   'maintenance_message',
+  'charity_enabled',
+  'discount_enabled',
   'telegram_channel_chat_id',
   'telegram_channel_url',
   'telegram_channel_name',
@@ -107,7 +111,7 @@ async function loadSettings(supabase: any) {
   if ((error as any)?.code === 'PGRST116') return null;
   if (isMissingAppSettingsRelation(error)) {
     throw new Error(
-      'app_settings table is missing. Run DB migrations: scripts/06-automation-discount-and-booking-enhancements.sql, scripts/08-gnpl-credit-module.sql, scripts/10-receipt-intelligence-settings.sql'
+      'app_settings table is missing. Run DB migrations: scripts/06-automation-discount-and-booking-enhancements.sql, scripts/08-gnpl-credit-module.sql, scripts/10-receipt-intelligence-settings.sql, scripts/13-miniapp-feature-flags.sql'
     );
   }
   throw error;
@@ -170,6 +174,12 @@ function normalizeBody(body: any) {
   }
   if ('maintenance_message' in payload) {
     payload.maintenance_message = String(payload.maintenance_message || '').trim() || null;
+  }
+  if ('charity_enabled' in payload) {
+    payload.charity_enabled = Boolean(payload.charity_enabled);
+  }
+  if ('discount_enabled' in payload) {
+    payload.discount_enabled = Boolean(payload.discount_enabled);
   }
 
   if ('telegram_channel_url' in payload) {
@@ -273,6 +283,8 @@ function normalizeSettingsRow(row: any) {
     two_factor_enabled: Boolean(merged.two_factor_enabled),
     maintenance_mode: Boolean(merged.maintenance_mode),
     maintenance_message: String(merged.maintenance_message || '').trim() || null,
+    charity_enabled: merged.charity_enabled !== false,
+    discount_enabled: merged.discount_enabled !== false,
     telegram_channel_chat_id: String(merged.telegram_channel_chat_id || '').trim() || null,
     telegram_channel_url: String(merged.telegram_channel_url || '').trim() || null,
     telegram_channel_name: String(merged.telegram_channel_name || '').trim() || null,
@@ -342,13 +354,13 @@ export async function POST(request: NextRequest) {
     if (result.error) {
       if (isMissingAppSettingsRelation(result.error)) {
         throw new Error(
-          'app_settings table is missing. Run DB migrations: scripts/06-automation-discount-and-booking-enhancements.sql, scripts/08-gnpl-credit-module.sql, scripts/10-receipt-intelligence-settings.sql'
+          'app_settings table is missing. Run DB migrations: scripts/06-automation-discount-and-booking-enhancements.sql, scripts/08-gnpl-credit-module.sql, scripts/10-receipt-intelligence-settings.sql, scripts/13-miniapp-feature-flags.sql'
         );
       }
       const missingColumn = detectMissingColumn(result.error);
       if (missingColumn) {
         throw new Error(
-          `Missing app_settings column "${missingColumn}". Run DB migrations: scripts/06-automation-discount-and-booking-enhancements.sql, scripts/08-gnpl-credit-module.sql, scripts/10-receipt-intelligence-settings.sql`
+          `Missing app_settings column "${missingColumn}". Run DB migrations: scripts/06-automation-discount-and-booking-enhancements.sql, scripts/08-gnpl-credit-module.sql, scripts/10-receipt-intelligence-settings.sql, scripts/13-miniapp-feature-flags.sql`
         );
       }
       throw result.error;
@@ -365,3 +377,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

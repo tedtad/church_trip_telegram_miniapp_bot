@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Plus, Edit, Trash, X, Loader2 } from 'lucide-react';
+import { Plus, Edit, Trash, X, Loader2, Search, LayoutGrid, List, ChevronDown, ChevronUp } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { serializeBankAccountsForTextInput } from '@/lib/payment-config';
 
@@ -65,6 +65,11 @@ export default function TripsPage() {
   const [deletingTrip, setDeletingTrip] = useState<Trip | null>(null);
   const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState<TripFormInput>(EMPTY_FORM);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed' | 'cancelled'>('all');
+  const [sortMode, setSortMode] = useState<'departure_desc' | 'departure_asc' | 'price_desc' | 'price_asc' | 'name_asc'>('departure_desc');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [expandedTripIds, setExpandedTripIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadTrips();
@@ -237,6 +242,51 @@ export default function TripsPage() {
     }
   };
 
+  const toggleExpanded = (tripId: string) => {
+    setExpandedTripIds((prev) => ({
+      ...prev,
+      [tripId]: !prev[tripId],
+    }));
+  };
+
+  const filteredTrips = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const next = trips.filter((trip) => {
+      const status = String(trip.status || '').toLowerCase() as 'active' | 'completed' | 'cancelled';
+      if (statusFilter !== 'all' && status !== statusFilter) return false;
+
+      if (!query) return true;
+      const haystack = [
+        trip.name || '',
+        trip.destination || '',
+        trip.description || '',
+        String((trip as any).telegram_group_chat_id || ''),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+
+    next.sort((a, b) => {
+      if (sortMode === 'name_asc') {
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      }
+      if (sortMode === 'price_asc') {
+        return Number(a.price_per_ticket || 0) - Number(b.price_per_ticket || 0);
+      }
+      if (sortMode === 'price_desc') {
+        return Number(b.price_per_ticket || 0) - Number(a.price_per_ticket || 0);
+      }
+
+      const aDeparture = new Date(a.departure_date || 0).getTime();
+      const bDeparture = new Date(b.departure_date || 0).getTime();
+      if (sortMode === 'departure_asc') return aDeparture - bDeparture;
+      return bDeparture - aDeparture;
+    });
+
+    return next;
+  }, [searchQuery, sortMode, statusFilter, trips]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -255,95 +305,163 @@ export default function TripsPage() {
         </Button>
       </div>
 
-      {/* Trips Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {trips.map((trip) => (
-          <Card key={trip.id} className="bg-slate-800 border-slate-700 hover:border-slate-600 transition-all">
-            {trip.image_url ? (
-              <img
-                src={trip.image_url}
-                alt={trip.name}
-                className="h-36 w-full object-cover rounded-t-xl border-b border-slate-700"
-              />
-            ) : (
-              <div className="h-36 w-full rounded-t-xl border-b border-slate-700 bg-slate-900 flex items-center justify-center text-slate-500 text-sm">
-                No destination image
-              </div>
-            )}
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-white mb-2">{trip.name}</h3>
-              <p className="text-slate-400 text-sm mb-4">{trip.description}</p>
-              <div className="space-y-2 text-sm mb-4">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Destination</span>
-                  <span className="text-white font-medium">{trip.destination}</span>
+      <Card className="bg-slate-800 border-slate-700 p-4 mb-6 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="relative md:col-span-2">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by trip, destination, description, group id"
+              className="w-full pl-9 pr-3 py-2 bg-slate-700 border border-slate-600 text-white rounded"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
+            className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
+          >
+            <option value="all">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as any)}
+            className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
+          >
+            <option value="departure_desc">Departure: Latest</option>
+            <option value="departure_asc">Departure: Earliest</option>
+            <option value="price_desc">Price: High to Low</option>
+            <option value="price_asc">Price: Low to High</option>
+            <option value="name_asc">Name: A-Z</option>
+          </select>
+        </div>
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-300">
+            Showing {filteredTrips.length} of {trips.length} trips
+          </p>
+          <div className="inline-flex rounded-md border border-slate-600 overflow-hidden">
+            <button
+              className={`px-3 py-2 text-sm flex items-center gap-2 ${viewMode === 'grid' ? 'bg-primary text-white' : 'bg-slate-700 text-slate-200'}`}
+              onClick={() => setViewMode('grid')}
+            >
+              <LayoutGrid size={14} />
+              Grid
+            </button>
+            <button
+              className={`px-3 py-2 text-sm flex items-center gap-2 ${viewMode === 'list' ? 'bg-primary text-white' : 'bg-slate-700 text-slate-200'}`}
+              onClick={() => setViewMode('list')}
+            >
+              <List size={14} />
+              List
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6' : 'space-y-4'}>
+        {filteredTrips.map((trip) => {
+          const isExpanded = Boolean(expandedTripIds[trip.id]);
+          return (
+            <Card key={trip.id} className="bg-slate-800 border-slate-700 hover:border-slate-600 transition-all">
+              {trip.image_url ? (
+                <img
+                  src={trip.image_url}
+                  alt={trip.name}
+                  className={`${viewMode === 'grid' ? 'h-36' : 'h-28'} w-full object-cover rounded-t-xl border-b border-slate-700`}
+                />
+              ) : (
+                <div className={`${viewMode === 'grid' ? 'h-36' : 'h-28'} w-full rounded-t-xl border-b border-slate-700 bg-slate-900 flex items-center justify-center text-slate-500 text-sm`}>
+                  No destination image
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Departure</span>
-                  <span className="text-white font-medium">
-                    {new Date(trip.departure_date).toLocaleDateString()}
-                  </span>
+              )}
+              <div className="p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">{trip.name}</h3>
+                    <p className="text-slate-400 text-sm mt-1">{trip.destination}</p>
+                  </div>
+                  <button
+                    onClick={() => toggleExpanded(trip.id)}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                  >
+                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    {isExpanded ? 'Collapse' : 'Expand'}
+                  </button>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Price/Ticket</span>
-                  <span className="text-white font-medium">{trip.price_per_ticket} ETB</span>
+
+                <div className="grid grid-cols-2 gap-2 text-sm mt-4">
+                  <div className="flex justify-between col-span-2">
+                    <span className="text-slate-400">Departure</span>
+                    <span className="text-white font-medium">{new Date(trip.departure_date).toLocaleDateString()}</span>
+                  </div>
+                  <div className="flex justify-between col-span-2">
+                    <span className="text-slate-400">Price/Ticket</span>
+                    <span className="text-white font-medium">{trip.price_per_ticket} ETB</span>
+                  </div>
+                  <div className="flex justify-between col-span-2">
+                    <span className="text-slate-400">Seats Available</span>
+                    <span className="text-white font-medium">{trip.available_seats}/{trip.total_seats}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Seats Available</span>
-                  <span className="text-white font-medium">
-                    {trip.available_seats}/{trip.total_seats}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">GNPL</span>
-                  <span className="text-white font-medium">
-                    {(trip as any).allow_gnpl ? 'Enabled' : 'Disabled'}
-                  </span>
-                </div>
-                {(trip as any).telegram_group_url ? (
-                  <div className="flex justify-between gap-3">
-                    <span className="text-slate-400">Trip Group</span>
-                    <a
-                      href={String((trip as any).telegram_group_url)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-cyan-300 underline text-right"
-                    >
-                      Open Group
-                    </a>
+
+                {isExpanded ? (
+                  <div className="space-y-2 text-sm mt-4 border-t border-slate-700 pt-4">
+                    <p className="text-slate-300">{trip.description || 'No description'}</p>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">GNPL</span>
+                      <span className="text-white font-medium">{(trip as any).allow_gnpl ? 'Enabled' : 'Disabled'}</span>
+                    </div>
+                    {(trip as any).telegram_group_url ? (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-400">Trip Group</span>
+                        <a
+                          href={String((trip as any).telegram_group_url)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-cyan-300 underline text-right"
+                        >
+                          Open Group
+                        </a>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
+
+                <div className="flex gap-2 mt-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openEditModal(trip)}
+                    className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600"
+                  >
+                    <Edit size={16} />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDeletingTrip(trip)}
+                    className="flex-1 bg-red-900/20 hover:bg-red-900/30 text-red-400 border-red-800"
+                  >
+                    <Trash size={16} />
+                    Delete
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openEditModal(trip)}
-                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600"
-                >
-                  <Edit size={16} />
-                  Edit
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDeletingTrip(trip)}
-                  className="flex-1 bg-red-900/20 hover:bg-red-900/30 text-red-400 border-red-800"
-                >
-                  <Trash size={16} />
-                  Delete
-                </Button>
-              </div>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
 
-      {trips.length === 0 && (
+      {filteredTrips.length === 0 && (
         <Card className="bg-slate-800 border-slate-700 p-12 text-center">
-          <p className="text-slate-400 mb-4">No trips created yet</p>
+          <p className="text-slate-400 mb-4">No trips matched the current filters</p>
           <Button onClick={openCreateModal} className="bg-primary hover:bg-primary/90 text-white">
-            Create Your First Trip
+            Add Trip
           </Button>
         </Card>
       )}

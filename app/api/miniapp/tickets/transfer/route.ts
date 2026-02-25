@@ -6,6 +6,7 @@ import { verifyTelegramMiniAppInitData } from '@/lib/telegram-miniapp';
 import { generateTicketNumber } from '@/lib/telegram';
 import { generateTicketQRCode } from '@/lib/qr-code';
 import { resolveOrCreateCustomerByPhone } from '@/lib/offline-customer';
+import { getMiniAppMaintenanceMessage, getMiniAppRuntimeSettings } from '@/lib/miniapp-access';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -92,6 +93,14 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await getPrimaryClient();
+    const appSettings = await getMiniAppRuntimeSettings(client);
+    if (appSettings.maintenanceMode) {
+      return NextResponse.json(
+        { ok: false, error: 'MINIAPP_MAINTENANCE', message: getMiniAppMaintenanceMessage(appSettings) },
+        { status: 503 }
+      );
+    }
+
     const { data: ticket, error: ticketError } = await client
       .from('tickets')
       .select(

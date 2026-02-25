@@ -5,6 +5,7 @@ import { verifyTelegramMiniAppInitData } from '@/lib/telegram-miniapp';
 import { formatBankAccounts, getTripManualPaymentConfig } from '@/lib/payment-config';
 import { calculateDiscountAmount, normalizeDiscountCode, resolveDiscountVoucher } from '@/lib/discount-vouchers';
 import { normalizeGnplSettings } from '@/lib/gnpl';
+import { getMiniAppMaintenanceMessage, getMiniAppRuntimeSettings } from '@/lib/miniapp-access';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -198,7 +199,7 @@ export async function POST(request: NextRequest) {
     const quantity = Number.isFinite(rawQuantity) && rawQuantity > 0 ? Math.floor(rawQuantity) : 1;
     const customerName = normalizeCustomerName(body?.customerName);
     const customerPhone = normalizeCustomerPhone(body?.customerPhone);
-    const discountCode = normalizeDiscountCode(body?.discountCode);
+    const discountCodeInput = normalizeDiscountCode(body?.discountCode);
     const legacyIdNumber = normalizeIdNumber(body?.idNumber);
     const gnplIdCardDataUrl = String(body?.gnplIdCardDataUrl || '').trim();
     const gnplIdCardFileName = normalizeUploadedFileName(body?.gnplIdCardFileName, `gnpl_id_${Date.now()}.bin`);
@@ -242,6 +243,14 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await getPrimaryClient();
+    const miniAppSettings = await getMiniAppRuntimeSettings(client);
+    if (miniAppSettings.maintenanceMode) {
+      return NextResponse.json(
+        { ok: false, error: 'MINIAPP_MAINTENANCE', message: getMiniAppMaintenanceMessage(miniAppSettings) },
+        { status: 503 }
+      );
+    }
+    const discountCode = miniAppSettings.discountEnabled ? discountCodeInput : '';
     const { data: settingsRaw } = await client
       .from('app_settings')
       .select(

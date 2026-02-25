@@ -16,6 +16,9 @@ export default function SettingsPage() {
     receipt_cache_ttl: 3600,
     max_file_size: 10,
     maintenance_mode: false,
+    two_factor_enabled: true,
+    charity_enabled: true,
+    discount_enabled: true,
     telegram_channel_url: '',
     telegram_channel_chat_id: '',
     telegram_channel_name: '',
@@ -77,6 +80,9 @@ export default function SettingsPage() {
           max_file_size: Number(data.settings.max_file_size || prev.max_file_size),
           receipt_cache_ttl: Number(data.settings.receipt_cache_ttl || prev.receipt_cache_ttl),
           maintenance_mode: Boolean(data.settings.maintenance_mode),
+          two_factor_enabled: data.settings.two_factor_enabled !== false,
+          charity_enabled: data.settings.charity_enabled !== false,
+          discount_enabled: data.settings.discount_enabled !== false,
           telegram_channel_url: String(data.settings.telegram_channel_url || ''),
           telegram_channel_chat_id: String(data.settings.telegram_channel_chat_id || ''),
           telegram_channel_name: String(data.settings.telegram_channel_name || ''),
@@ -532,7 +538,41 @@ export default function SettingsPage() {
             />
             <span className="text-sm font-medium">Maintenance Mode</span>
           </label>
+          <label className="mt-4 flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.two_factor_enabled}
+              onChange={(e) => setSettings((prev) => ({ ...prev, two_factor_enabled: e.target.checked }))}
+              className="w-4 h-4 rounded"
+            />
+            <span className="text-sm font-medium">Require 2FA for admin login</span>
+          </label>
           <p className="text-xs text-muted-foreground mt-2">When enabled, non-admin users will see a maintenance message</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Mini App Feature Flags</CardTitle>
+          <CardDescription>Control which modules are visible in the Mini App.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.charity_enabled}
+              onChange={(e) => setSettings((prev) => ({ ...prev, charity_enabled: e.target.checked }))}
+            />
+            Enable charity view in Mini App
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.discount_enabled}
+              onChange={(e) => setSettings((prev) => ({ ...prev, discount_enabled: e.target.checked }))}
+            />
+            Enable discount code input in Mini App
+          </label>
         </CardContent>
       </Card>
 

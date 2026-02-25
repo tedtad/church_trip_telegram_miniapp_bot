@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { verifyTelegramMiniAppInitData } from '@/lib/telegram-miniapp';
 import { sendCharityDonationThankYou } from '@/lib/charity-automation';
 import { normalizeDiscountCode, incrementVoucherUsage } from '@/lib/discount-vouchers';
+import { getMiniAppMaintenanceMessage, getMiniAppRuntimeSettings } from '@/lib/miniapp-access';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const MAX_AGE_SECONDS = Number(process.env.TELEGRAM_MINIAPP_MAX_AGE_SEC || 60 * 60 * 24);
@@ -82,6 +83,17 @@ async function loadInvitationByCode(supabase: any, invitationCode: string): Prom
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createAdminClient();
+    const appSettings = await getMiniAppRuntimeSettings(supabase);
+    if (appSettings.maintenanceMode) {
+      return NextResponse.json(
+        { ok: false, message: getMiniAppMaintenanceMessage(appSettings) },
+        { status: 503 }
+      );
+    }
+    if (!appSettings.charityEnabled) {
+      return NextResponse.json({ ok: false, message: 'Charity module is currently disabled.' }, { status: 403 });
+    }
+
     const formData = await request.formData();
     const initData = resolveInitData(request, formData);
     const auth = verifyTelegramMiniAppInitData(initData, TELEGRAM_BOT_TOKEN, MAX_AGE_SECONDS);

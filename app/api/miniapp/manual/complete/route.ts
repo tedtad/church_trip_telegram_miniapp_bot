@@ -7,6 +7,7 @@ import { generateTicketNumber, generateTripSerialNumber } from '@/lib/telegram';
 import { getTripManualPaymentConfig } from '@/lib/payment-config';
 import { calculateDiscountAmount, incrementVoucherUsage, normalizeDiscountCode, resolveDiscountVoucher } from '@/lib/discount-vouchers';
 import { analyzeReceiptSubmission, normalizeReferenceToken, parseReceiptDateToken } from '@/lib/receipt-intelligence';
+import { getMiniAppMaintenanceMessage, getMiniAppRuntimeSettings } from '@/lib/miniapp-access';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
     const amountPaid = Number(body?.amountPaid || 0);
     const bankIndex = Number(body?.bankIndex ?? -1);
     const referenceInput = normalizeReferenceToken(body?.referenceNumber);
-    const discountCodeInput = normalizeDiscountCode(body?.discountCode);
+    const discountCodeRaw = normalizeDiscountCode(body?.discountCode);
     const receiptDataUrl = String(body?.receiptDataUrl || '').trim();
     const receiptLinkInput = String(body?.receiptLink || '').trim();
     const receiptDateInput = parseReceiptDateToken(body?.receiptDate);
@@ -146,6 +147,15 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await getPrimaryClient();
+    const miniAppSettings = await getMiniAppRuntimeSettings(client);
+    if (miniAppSettings.maintenanceMode) {
+      return NextResponse.json(
+        { ok: false, error: 'MINIAPP_MAINTENANCE', message: getMiniAppMaintenanceMessage(miniAppSettings) },
+        { status: 503 }
+      );
+    }
+    const discountCodeInput = miniAppSettings.discountEnabled ? discountCodeRaw : '';
+
     const { data: settingsRaw } = await client
       .from('app_settings')
       .select('receipt_intelligence_enabled, receipt_sample_collection_enabled, max_file_size')

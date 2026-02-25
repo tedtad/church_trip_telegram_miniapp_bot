@@ -14,6 +14,11 @@ type MiniAppUser = {
 };
 
 type MiniAppSettings = {
+  appName?: string;
+  maintenanceMode?: boolean;
+  maintenanceMessage?: string;
+  charityEnabled?: boolean;
+  discountEnabled?: boolean;
   telegramChannelUrl?: string;
   telegramChannelName?: string;
   gnplEnabled?: boolean;
@@ -158,6 +163,16 @@ function normalizeDiscountCodeInput(value: string) {
     .replace(/[^A-Z0-9_-]/g, '');
 }
 
+function splitNameParts(fullName: string) {
+  const normalized = String(fullName || '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (!normalized) return { firstName: '', lastName: '' };
+  const parts = normalized.split(' ');
+  const firstName = parts.shift() || '';
+  return { firstName, lastName: parts.join(' ') };
+}
+
 function isExpiredByDeparture(dateValue?: string | null) {
   if (!dateValue) return false;
   const date = new Date(dateValue);
@@ -227,9 +242,10 @@ export default function MiniAppPage() {
   const [busyTripId, setBusyTripId] = useState('');
   const [languageSaving, setLanguageSaving] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
-  const [phoneSaving, setPhoneSaving] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [maintenanceMessage, setMaintenanceMessage] = useState('');
   const [showExpiredBookings, setShowExpiredBookings] = useState(false);
   const [methodByTrip, setMethodByTrip] = useState<Record<string, PaymentMethod>>({});
   const [quantityByTrip, setQuantityByTrip] = useState<Record<string, number>>({});
@@ -247,6 +263,12 @@ export default function MiniAppPage() {
     (key: string) => I18N[uiLang]?.[key] || I18N.en[key] || key,
     [uiLang]
   );
+  const displayAppName = useMemo(
+    () => String(miniAppSettings?.appName || '').trim() || t('app_title'),
+    [miniAppSettings?.appName, t]
+  );
+  const charityEnabled = miniAppSettings?.charityEnabled !== false;
+  const discountEnabled = miniAppSettings?.discountEnabled !== false;
 
   const selectedMethod = useCallback(
     (trip: Trip) => {
@@ -284,18 +306,43 @@ export default function MiniAppPage() {
     setLoading(true);
     setError('');
     setNotice('');
+    setMaintenanceMessage('');
     try {
-      const [sessionRes, tripsRes, bookingsRes, gnplRes] = await Promise.all([
-        apiFetch('/api/miniapp/session', { method: 'POST', body: JSON.stringify({ initData }) }),
-        apiFetch('/api/miniapp/trips'),
-        apiFetch('/api/miniapp/bookings'),
-        apiFetch('/api/miniapp/gnpl'),
-      ]);
+      const sessionRes = await apiFetch('/api/miniapp/session', {
+        method: 'POST',
+        body: JSON.stringify({ initData }),
+      });
 
       const sessionJson = await sessionRes.json().catch(() => ({}));
       if (!sessionRes.ok || !sessionJson?.ok) {
+        if (String(sessionJson?.error || '') === 'MINIAPP_MAINTENANCE') {
+          const sessionSettings = (sessionJson?.appSettings || {}) as MiniAppSettings;
+          setMiniAppSettings({
+            appName: String(sessionSettings?.appName || '').trim(),
+            maintenanceMode: true,
+            maintenanceMessage: String(sessionJson?.message || sessionSettings?.maintenanceMessage || '').trim(),
+            charityEnabled: sessionSettings?.charityEnabled !== false,
+            discountEnabled: sessionSettings?.discountEnabled !== false,
+            telegramChannelUrl: String(sessionSettings?.telegramChannelUrl || '').trim(),
+            telegramChannelName: String(sessionSettings?.telegramChannelName || '').trim(),
+            gnplEnabled: Boolean(sessionSettings?.gnplEnabled),
+            gnplRequireAdminApproval: sessionSettings?.gnplRequireAdminApproval !== false,
+            gnplDefaultTermDays: Number(sessionSettings?.gnplDefaultTermDays || 14),
+            gnplPenaltyEnabled: sessionSettings?.gnplPenaltyEnabled !== false,
+            gnplPenaltyPercent: Number(sessionSettings?.gnplPenaltyPercent || 0),
+            gnplPenaltyPeriodDays: Number(sessionSettings?.gnplPenaltyPeriodDays || 7),
+          });
+          setTrips([]);
+          setBookings([]);
+          setGnplAccounts([]);
+          setMaintenanceMessage(
+            String(sessionJson?.message || sessionSettings?.maintenanceMessage || 'Mini App is under maintenance.')
+          );
+          return;
+        }
         throw new Error(sessionJson?.error || t('error_session_failed'));
       }
+
       const sessionUser = sessionJson.user as MiniAppUser;
       const sessionSettings = (sessionJson.appSettings || {}) as MiniAppSettings;
       setUser(sessionUser);
@@ -305,6 +352,11 @@ export default function MiniAppPage() {
       setPhoneNumber(String(sessionUser?.phoneNumber || ''));
       setUiLang(sessionUser?.languageCode === 'en' ? 'en' : 'am');
       setMiniAppSettings({
+        appName: String(sessionSettings?.appName || '').trim(),
+        maintenanceMode: Boolean(sessionSettings?.maintenanceMode),
+        maintenanceMessage: String(sessionSettings?.maintenanceMessage || '').trim(),
+        charityEnabled: sessionSettings?.charityEnabled !== false,
+        discountEnabled: sessionSettings?.discountEnabled !== false,
         telegramChannelUrl: String(sessionSettings?.telegramChannelUrl || '').trim(),
         telegramChannelName: String(sessionSettings?.telegramChannelName || '').trim(),
         gnplEnabled: Boolean(sessionSettings?.gnplEnabled),
@@ -315,21 +367,53 @@ export default function MiniAppPage() {
         gnplPenaltyPeriodDays: Number(sessionSettings?.gnplPenaltyPeriodDays || 7),
       });
 
+      const requests: Array<Promise<Response>> = [apiFetch('/api/miniapp/trips'), apiFetch('/api/miniapp/bookings')];
+      const shouldFetchGnpl = Boolean(sessionSettings?.gnplEnabled);
+      if (shouldFetchGnpl) {
+        requests.push(apiFetch('/api/miniapp/gnpl'));
+      }
+      const responses = await Promise.all(requests);
+      const [tripsRes, bookingsRes, gnplRes] = responses;
+
       const tripsJson = await tripsRes.json().catch(() => ({}));
       if (!tripsRes.ok || !tripsJson?.ok) {
+        if (String(tripsJson?.error || '') === 'MINIAPP_MAINTENANCE') {
+          setMaintenanceMessage(String(tripsJson?.message || 'Mini App is under maintenance.'));
+          setTrips([]);
+          setBookings([]);
+          setGnplAccounts([]);
+          return;
+        }
         throw new Error(tripsJson?.error || t('error_trips_failed'));
       }
       setTrips((tripsJson.trips || []) as Trip[]);
 
       const bookingsJson = await bookingsRes.json().catch(() => ({}));
       if (!bookingsRes.ok || !bookingsJson?.ok) {
+        if (String(bookingsJson?.error || '') === 'MINIAPP_MAINTENANCE') {
+          setMaintenanceMessage(String(bookingsJson?.message || 'Mini App is under maintenance.'));
+          setTrips([]);
+          setBookings([]);
+          setGnplAccounts([]);
+          return;
+        }
         throw new Error(bookingsJson?.error || t('error_bookings_failed'));
       }
       setBookings((bookingsJson.bookings || []) as Booking[]);
 
-      const gnplJson = await gnplRes.json().catch(() => ({}));
-      if (gnplRes.ok && gnplJson?.ok) {
-        setGnplAccounts((gnplJson.accounts || []) as GnplAccount[]);
+      if (shouldFetchGnpl && gnplRes) {
+        const gnplJson = await gnplRes.json().catch(() => ({}));
+        if (gnplRes.ok && gnplJson?.ok) {
+          setGnplAccounts((gnplJson.accounts || []) as GnplAccount[]);
+        } else if (String(gnplJson?.error || '') === 'MINIAPP_MAINTENANCE') {
+          setMaintenanceMessage(String(gnplJson?.message || 'Mini App is under maintenance.'));
+          setTrips([]);
+          setBookings([]);
+          setGnplAccounts([]);
+          return;
+        } else {
+          setGnplAccounts([]);
+        }
       } else {
         setGnplAccounts([]);
       }
@@ -346,7 +430,7 @@ export default function MiniAppPage() {
       const tripId = trip.id;
       const paymentMethod = selectedMethod(trip);
       const quantity = selectedQuantity(tripId);
-      const discountCode = selectedDiscountCode(tripId);
+      const discountCode = discountEnabled ? selectedDiscountCode(tripId) : '';
       const normalizedName = String(customerName || '').trim().replace(/\s+/g, ' ');
       const normalizedPhone = normalizePhoneInput(phoneNumber).trim();
       const gnplEnabledForTrip = Boolean(miniAppSettings?.gnplEnabled && trip.allow_gnpl);
@@ -479,6 +563,7 @@ export default function MiniAppPage() {
       loadData,
       miniAppSettings,
       phoneNumber,
+      discountEnabled,
       selectedDiscountCode,
       selectedMethod,
       selectedQuantity,
@@ -719,6 +804,11 @@ export default function MiniAppPage() {
 
   useEffect(() => {
     if (!pendingInviteCode || trips.length === 0) return;
+    if (miniAppSettings?.discountEnabled === false) {
+      setPendingInviteCode('');
+      setPendingInviteTripId('');
+      return;
+    }
 
     setDiscountCodeByTrip((prev) => {
       const next = { ...prev };
@@ -741,7 +831,7 @@ export default function MiniAppPage() {
 
     setPendingInviteCode('');
     setPendingInviteTripId('');
-  }, [pendingInviteCode, pendingInviteTripId, trips]);
+  }, [miniAppSettings?.discountEnabled, pendingInviteCode, pendingInviteTripId, trips]);
 
   const username = useMemo(() => {
     if (!user) return '';
@@ -795,36 +885,58 @@ export default function MiniAppPage() {
     [apiFetch, initData, languageSaving, t, uiLang]
   );
 
-  const savePhone = useCallback(async () => {
+  const saveProfile = useCallback(async () => {
+    const normalizedName = String(customerName || '')
+      .trim()
+      .replace(/\s+/g, ' ');
     const normalized = normalizePhoneInput(phoneNumber).trim();
+    if (!normalizedName) {
+      setError(t('error_customer_name_required'));
+      return;
+    }
     if (!/^\+?[0-9]{7,20}$/.test(normalized)) {
       setError(t('error_phone_required'));
       return;
     }
 
-    setPhoneSaving(true);
+    setProfileSaving(true);
     setError('');
     setNotice('');
     try {
       const response = await apiFetch('/api/miniapp/profile/phone', {
         method: 'POST',
-        body: JSON.stringify({ initData, phoneNumber: normalized }),
+        body: JSON.stringify({ initData, phoneNumber: normalized, customerName: normalizedName }),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || !json?.ok) {
+        if (String(json?.error || '') === 'MINIAPP_MAINTENANCE') {
+          setMaintenanceMessage(String(json?.message || 'Mini App is under maintenance.'));
+          return;
+        }
         throw new Error(json?.error || t('error_save_phone_failed'));
       }
 
+      const { firstName, lastName } = splitNameParts(String(json.customerName || normalizedName));
+      setCustomerName(String(json.customerName || normalizedName));
       setPhoneNumber(String(json.phoneNumber || normalized));
-      setUser((prev) => (prev ? { ...prev, phoneNumber: String(json.phoneNumber || normalized) } : prev));
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              firstName: firstName || prev.firstName,
+              lastName: lastName || '',
+              phoneNumber: String(json.phoneNumber || normalized),
+            }
+          : prev
+      );
       setNotice(t('notice_phone_saved'));
     } catch (e) {
       const message = e instanceof Error ? e.message : t('error_save_phone_failed');
       setError(message);
     } finally {
-      setPhoneSaving(false);
+      setProfileSaving(false);
     }
-  }, [apiFetch, initData, phoneNumber, t]);
+  }, [apiFetch, customerName, initData, phoneNumber, t]);
 
   const copyText = useCallback(async (value: string) => {
     const text = String(value || '').trim();
@@ -921,6 +1033,23 @@ export default function MiniAppPage() {
     showExpiredBookings ? true : !isExpiredByDeparture(booking.departureDate)
   );
 
+  if (maintenanceMessage) {
+    return (
+      <main
+        className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2937,#020617)] text-slate-100 px-4 py-5"
+        style={uiLang === 'am' ? { fontFamily: AMHARIC_FONT_STACK } : undefined}
+      >
+        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
+        <section className="max-w-xl mx-auto rounded-2xl border border-amber-500/40 bg-slate-900/80 p-6 text-center space-y-3">
+          <p className="text-xs tracking-[0.18em] uppercase text-amber-300">{displayAppName}</p>
+          <h1 className="text-xl font-semibold">{t('page_title')}</h1>
+          <p className="text-sm text-amber-100">{maintenanceMessage}</p>
+          <p className="text-xs text-slate-400">Developed by @Teddy</p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main
       className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2937,#020617)] text-slate-100 px-4 py-5"
@@ -930,16 +1059,18 @@ export default function MiniAppPage() {
 
       <section className="max-w-3xl mx-auto space-y-4">
         <header className="rounded-2xl border border-cyan-700/40 bg-slate-900/70 p-4 shadow-xl">
-          <p className="text-xs tracking-[0.18em] uppercase text-cyan-300">🎫 {t('app_title')}</p>
+          <p className="text-xs tracking-[0.18em] uppercase text-cyan-300">🎫 {displayAppName}</p>
           <h1 className="text-2xl font-semibold mt-1">✈️ {t('page_title')}</h1>
-          <div className="mt-4 flex gap-2">
-            <a
-              href="/miniapp/charity"
-              className="flex-1 rounded-lg bg-gradient-to-r from-red-600 to-red-700 px-4 py-2 text-center text-sm font-medium hover:from-red-700 hover:to-red-800 transition-all"
-            >
-              ❤️ {t('make_a_donation')}
-            </a>
-          </div>
+          {charityEnabled ? (
+            <div className="mt-4 flex gap-2">
+              <a
+                href="/miniapp/charity"
+                className="flex-1 rounded-lg bg-gradient-to-r from-red-600 to-red-700 px-4 py-2 text-center text-sm font-medium hover:from-red-700 hover:to-red-800 transition-all"
+              >
+                ❤️ {t('make_a_donation')}
+              </a>
+            </div>
+          ) : null}
           <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-slate-300">👤 {username || t('telegram_customer')}</p>
             <div className="flex flex-col gap-2 sm:items-end">
@@ -976,14 +1107,6 @@ export default function MiniAppPage() {
                   placeholder={t('phone_placeholder')}
                   className="rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-48"
                 />
-                <button
-                  type="button"
-                  onClick={savePhone}
-                  disabled={phoneSaving}
-                  className="rounded-md border border-cyan-700/50 bg-cyan-900/30 px-2 py-1 text-xs text-cyan-100 hover:bg-cyan-900/40 disabled:opacity-60"
-                >
-                  {phoneSaving ? t('saving_phone') : t('save_phone')}
-                </button>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <span className="text-xs text-slate-300 whitespace-nowrap">{t('id_card_scan')}</span>
@@ -1010,6 +1133,16 @@ export default function MiniAppPage() {
                   {t('gnpl_hint')}
                 </p>
               ) : null}
+              <div className="w-full flex justify-end">
+                <button
+                  type="button"
+                  onClick={saveProfile}
+                  disabled={profileSaving}
+                  className="rounded-md border border-cyan-700/50 bg-cyan-900/30 px-3 py-1 text-xs text-cyan-100 hover:bg-cyan-900/40 disabled:opacity-60"
+                >
+                  {profileSaving ? 'Saving profile...' : 'Save profile'}
+                </button>
+              </div>
             </div>
           </div>
           {miniAppSettings?.telegramChannelUrl ? (
@@ -1027,14 +1160,6 @@ export default function MiniAppPage() {
               </a>
             </div>
           ) : null}
-          <div className="mt-2">
-            <a
-              href="/miniapp/charity"
-              className="inline-flex items-center rounded-md border border-rose-700/50 bg-rose-900/30 px-3 py-1 text-xs text-rose-100 hover:bg-rose-900/40"
-            >
-              {t('make_a_donation')}
-            </a>
-          </div>
         </header>
 
         {error ? (
@@ -1128,18 +1253,20 @@ export default function MiniAppPage() {
                           }
                         />
                       </div>
-                      <input
-                        type="text"
-                        value={selectedDiscountCode(trip.id)}
-                        onChange={(e) =>
-                          setDiscountCodeByTrip((prev) => ({
-                            ...prev,
-                            [trip.id]: String(e.target.value || '').toUpperCase(),
-                          }))
-                        }
-                        className="rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
-                        placeholder={t('discount_code_optional')}
-                      />
+                      {discountEnabled ? (
+                        <input
+                          type="text"
+                          value={selectedDiscountCode(trip.id)}
+                          onChange={(e) =>
+                            setDiscountCodeByTrip((prev) => ({
+                              ...prev,
+                              [trip.id]: String(e.target.value || '').toUpperCase(),
+                            }))
+                          }
+                          className="rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
+                          placeholder={t('discount_code_optional')}
+                        />
+                      ) : null}
                       <select
                         className="rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
                         value={method}
@@ -1569,6 +1696,7 @@ export default function MiniAppPage() {
             })}
           </div>
         </div>
+        <p className="text-center text-xs text-slate-500 pt-2">Developed by @Teddy</p>
       </section>
     </main>
   );

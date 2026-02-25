@@ -3,6 +3,7 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { generateTicketQRCode } from '@/lib/qr-code';
 import { sendTelegramDocument, sendTelegramMessage } from '@/lib/telegram';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -113,12 +114,12 @@ async function insertActivityLog(
 
 export async function POST(request: NextRequest) {
   try {
-    const { receiptId, action, adminId, notes, reason, confirmationTicketNumber } = await request.json();
+    const { receiptId, action, notes, reason, confirmationTicketNumber } = await request.json();
     const appBaseUrl = resolveAppBaseUrl(process.env.NEXT_PUBLIC_APP_URL, request.nextUrl.origin, APP_URL);
 
-    if (!receiptId || !action || !adminId) {
+    if (!receiptId || !action) {
       return NextResponse.json(
-        { ok: false, error: 'receiptId, action and adminId are required' },
+        { ok: false, error: 'receiptId and action are required' },
         { status: 400 }
       );
     }
@@ -128,6 +129,15 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await getPrimaryClient();
+    const auth = await requireAdminPermission({
+      supabase: client,
+      request,
+      permission: 'tickets_review',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
+    const adminId = auth.actor.id;
 
     const { data: receipt, error: receiptError } = await client
       .from('receipts')

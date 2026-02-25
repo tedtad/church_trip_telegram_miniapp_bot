@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { getAdminSession } from '@/lib/admin-auth';
 import { hasAdminPermission, normalizeAdminRole } from '@/lib/admin-rbac';
@@ -21,38 +21,10 @@ interface ReceiptTicket {
   ticket_status: string;
 }
 
-interface CheckInCandidate {
-  ticketId: string;
-  ticketNumber: string;
-  serialNumber: string;
-  status: string;
-  tripId: string;
-  tripName: string;
-  destination: string;
-  departureDate: string;
-  telegramUserId: string;
-  customerName: string;
-  phoneNumber: string;
-  referenceNumber: string;
-}
-
-interface TripOption {
-  id: string;
-  name?: string | null;
-  destination?: string | null;
-  departure_date?: string | null;
-  available_seats?: number | null;
-  price_per_ticket?: number | null;
-}
-
 function isImageReceipt(url?: string | null) {
   if (!url) return false;
   const clean = url.split('?')[0].toLowerCase();
   return ['.jpg', '.jpeg', '.png', '.webp', '.gif'].some((ext) => clean.endsWith(ext));
-}
-
-function todayYmd() {
-  return new Date().toISOString().slice(0, 10);
 }
 
 function formatPaymentMethodLabel(method?: string) {
@@ -81,7 +53,6 @@ function dataUrlToBlob(dataUrl: string) {
 
 export default function TicketsPage() {
   const session = getAdminSession();
-  const adminId = String(session?.admin?.id || '');
   const adminRole = normalizeAdminRole(session?.admin?.role);
   const canManualSell = hasAdminPermission(adminRole, 'tickets_manual_sale');
 
@@ -94,24 +65,6 @@ export default function TicketsPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [rollbackTicketNumber, setRollbackTicketNumber] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [checkInPhone, setCheckInPhone] = useState('');
-  const [checkInDate, setCheckInDate] = useState(todayYmd());
-  const [checkInResults, setCheckInResults] = useState<CheckInCandidate[]>([]);
-  const [checkInSearching, setCheckInSearching] = useState(false);
-  const [checkInUpdatingTicketId, setCheckInUpdatingTicketId] = useState('');
-  const [checkInError, setCheckInError] = useState('');
-  const [manualSaleTrips, setManualSaleTrips] = useState<TripOption[]>([]);
-  const [manualSaleTripId, setManualSaleTripId] = useState('');
-  const [manualSaleQuantity, setManualSaleQuantity] = useState(1);
-  const [manualSaleCustomerName, setManualSaleCustomerName] = useState('');
-  const [manualSaleCustomerPhone, setManualSaleCustomerPhone] = useState('');
-  const [manualSaleReference, setManualSaleReference] = useState('');
-  const [manualSalePaymentMethod, setManualSalePaymentMethod] = useState('cash');
-  const [manualSaleAmount, setManualSaleAmount] = useState('');
-  const [manualSaleNotes, setManualSaleNotes] = useState('');
-  const [manualSaleLoading, setManualSaleLoading] = useState(false);
-  const [manualSaleNotice, setManualSaleNotice] = useState('');
-  const [manualSaleError, setManualSaleError] = useState('');
 
   const openReceiptAttachment = (url?: string | null, fileName?: string | null) => {
     const value = String(url || '').trim();
@@ -142,11 +95,6 @@ export default function TicketsPage() {
   useEffect(() => {
     loadReceipts();
   }, [filter]);
-
-  useEffect(() => {
-    if (!canManualSell) return;
-    loadManualSaleTrips();
-  }, [canManualSell]);
 
   const loadReceipts = async () => {
     try {
@@ -179,38 +127,6 @@ export default function TicketsPage() {
       setLoading(false);
     }
   };
-
-  const loadManualSaleTrips = async () => {
-    try {
-      const response = await fetch('/api/admin/trips', { cache: 'no-store' });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok || !json?.ok) return;
-      const tripRows = (json.trips || []) as TripOption[];
-      const active = tripRows.filter((trip) => {
-        const availableSeats = Number(trip.available_seats || 0);
-        return availableSeats > 0;
-      });
-      setManualSaleTrips(active);
-      if (!manualSaleTripId && active[0]?.id) {
-        setManualSaleTripId(active[0].id);
-      }
-    } catch (error) {
-      console.error('[tickets] Failed to load trip options for manual sale:', error);
-    }
-  };
-
-  const selectedManualSaleTrip = useMemo(
-    () => manualSaleTrips.find((trip) => trip.id === manualSaleTripId) || null,
-    [manualSaleTripId, manualSaleTrips]
-  );
-
-  useEffect(() => {
-    if (!selectedManualSaleTrip) return;
-    const unitPrice = Number(selectedManualSaleTrip.price_per_ticket || 0);
-    const qty = Math.max(1, Number(manualSaleQuantity || 1));
-    const expected = Number((unitPrice * qty).toFixed(2));
-    setManualSaleAmount(expected > 0 ? expected.toFixed(2) : '');
-  }, [manualSaleQuantity, selectedManualSaleTrip]);
 
   const loadReceiptTickets = async (receiptId: string) => {
     try {
@@ -253,9 +169,6 @@ export default function TicketsPage() {
   const handleApprove = async (receipt: ReceiptWithDetails) => {
     try {
       setProcessing(true);
-      const session = getAdminSession();
-
-      if (!session) return;
 
       const response = await fetch('/api/admin/tickets/decision', {
         method: 'POST',
@@ -263,7 +176,6 @@ export default function TicketsPage() {
         body: JSON.stringify({
           receiptId: receipt.id,
           action: 'approve',
-          adminId: session.admin.id,
           notes: approvalNotes,
         }),
       });
@@ -286,9 +198,6 @@ export default function TicketsPage() {
   const handleReject = async (receipt: ReceiptWithDetails) => {
     try {
       setProcessing(true);
-      const session = getAdminSession();
-
-      if (!session) return;
 
       const response = await fetch('/api/admin/tickets/decision', {
         method: 'POST',
@@ -296,7 +205,6 @@ export default function TicketsPage() {
         body: JSON.stringify({
           receiptId: receipt.id,
           action: 'reject',
-          adminId: session.admin.id,
           reason: rejectionReason,
         }),
       });
@@ -324,8 +232,6 @@ export default function TicketsPage() {
       }
 
       setProcessing(true);
-      const session = getAdminSession();
-      if (!session) return;
 
       const response = await fetch('/api/admin/tickets/decision', {
         method: 'POST',
@@ -333,7 +239,6 @@ export default function TicketsPage() {
         body: JSON.stringify({
           receiptId: receipt.id,
           action: 'rollback',
-          adminId: session.admin.id,
           notes: approvalNotes,
           confirmationTicketNumber: rollbackTicketNumber.trim(),
         }),
@@ -354,145 +259,6 @@ export default function TicketsPage() {
     }
   };
 
-  const searchCheckInCandidates = async () => {
-    try {
-      const phone = checkInPhone.trim();
-      if (!phone) {
-        setCheckInError('Phone number is required.');
-        setCheckInResults([]);
-        return;
-      }
-
-      setCheckInSearching(true);
-      setCheckInError('');
-
-      const params = new URLSearchParams();
-      params.set('phone', phone);
-      if (checkInDate) params.set('tripDate', checkInDate);
-
-      const response = await fetch(`/api/admin/tickets/checkin?${params.toString()}`, { cache: 'no-store' });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.ok) {
-        throw new Error(data?.error || 'Failed to search tickets');
-      }
-
-      setCheckInResults((data?.results || []) as CheckInCandidate[]);
-    } catch (error) {
-      setCheckInError((error as Error)?.message || 'Failed to search tickets');
-      setCheckInResults([]);
-    } finally {
-      setCheckInSearching(false);
-    }
-  };
-
-  const checkInTicket = async (ticketId: string) => {
-    try {
-      const session = getAdminSession();
-      if (!session) {
-        setCheckInError('Admin session not found.');
-        return;
-      }
-
-      setCheckInUpdatingTicketId(ticketId);
-      setCheckInError('');
-
-      const response = await fetch('/api/admin/tickets/checkin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ticketId,
-          tripDate: checkInDate || undefined,
-          adminId: session.admin.id,
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.ok) {
-        throw new Error(data?.error || 'Failed to check in ticket');
-      }
-
-      setCheckInResults((prev) =>
-        prev.map((row) =>
-          row.ticketId === ticketId
-            ? {
-              ...row,
-              status: 'used',
-            }
-            : row
-        )
-      );
-    } catch (error) {
-      setCheckInError((error as Error)?.message || 'Failed to check in ticket');
-    } finally {
-      setCheckInUpdatingTicketId('');
-    }
-  };
-
-  const submitManualSale = async () => {
-    try {
-      if (!canManualSell) {
-        setManualSaleError('Your role does not allow manual sales.');
-        return;
-      }
-      if (!adminId) {
-        setManualSaleError('Admin session not found.');
-        return;
-      }
-      if (!manualSaleTripId) {
-        setManualSaleError('Please select a trip.');
-        return;
-      }
-      if (!manualSaleCustomerName.trim() || !manualSaleCustomerPhone.trim()) {
-        setManualSaleError('Customer name and phone number are required.');
-        return;
-      }
-      if (!manualSaleReference.trim()) {
-        setManualSaleError('Payment reference is required.');
-        return;
-      }
-
-      setManualSaleLoading(true);
-      setManualSaleError('');
-      setManualSaleNotice('');
-
-      const response = await fetch('/api/admin/tickets/manual-sale', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-id': adminId,
-        },
-        body: JSON.stringify({
-          tripId: manualSaleTripId,
-          quantity: Math.max(1, Number(manualSaleQuantity || 1)),
-          customerName: manualSaleCustomerName.trim(),
-          customerPhone: manualSaleCustomerPhone.trim(),
-          paymentMethod: manualSalePaymentMethod,
-          referenceNumber: manualSaleReference.trim(),
-          amountPaid: Number(manualSaleAmount || 0),
-          notes: manualSaleNotes.trim() || undefined,
-        }),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok || !json?.ok) {
-        throw new Error(json?.error || 'Failed to complete manual sale');
-      }
-
-      setManualSaleNotice(
-        `Manual sale completed. Reference: ${String(
-          json?.receipt?.referenceNumber || '-'
-        )} | Tickets: ${Array.isArray(json?.tickets) ? json.tickets.length : 0}`
-      );
-      setManualSaleCustomerName('');
-      setManualSaleCustomerPhone('');
-      setManualSaleReference('');
-      setManualSaleNotes('');
-      await loadReceipts();
-    } catch (error) {
-      setManualSaleError((error as Error)?.message || 'Failed to complete manual sale');
-    } finally {
-      setManualSaleLoading(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -504,7 +270,7 @@ export default function TicketsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold text-white">Ticket Approvals</h1>
+        <h1 className="text-3xl font-bold text-white">Ticket Approval</h1>
         <a
           href="/admin/checkin"
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
@@ -515,191 +281,36 @@ export default function TicketsPage() {
       </div>
 
       <Card className="bg-slate-800 border-slate-700 p-5 mb-6">
-        <h2 className="text-lg font-semibold text-white mb-3">Manual Check-In By Phone</h2>
+        <h2 className="text-lg font-semibold text-white mb-2">Ticket Operations</h2>
         <p className="text-sm text-slate-400 mb-4">
-          Search confirmed tickets by customer phone and check in manually on trip day.
+          Ticket approval is managed on this page. Manual sale, manual check-in, and scanner check-in are separate.
         </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-          <input
-            type="text"
-            value={checkInPhone}
-            onChange={(e) => setCheckInPhone(e.target.value)}
-            placeholder="Phone number"
-            className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded placeholder:text-slate-400 focus:outline-none focus:border-primary"
-          />
-          <input
-            type="date"
-            value={checkInDate}
-            onChange={(e) => setCheckInDate(e.target.value)}
-            className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded focus:outline-none focus:border-primary"
-          />
-          <Button
-            onClick={searchCheckInCandidates}
-            disabled={checkInSearching}
-            className="bg-primary hover:bg-primary/90 text-white flex items-center justify-center gap-2"
-          >
-            <Search size={16} />
-            {checkInSearching ? 'Searching...' : 'Search Tickets'}
-          </Button>
-        </div>
-
-        {checkInError ? <p className="text-sm text-red-400 mb-3">{checkInError}</p> : null}
-
-        {checkInResults.length > 0 ? (
-          <div className="overflow-x-auto border border-slate-700 rounded-lg">
-            <table className="w-full">
-              <thead className="bg-slate-900 border-b border-slate-700">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Customer</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Phone</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Trip</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Ticket</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Status</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700">
-                {checkInResults.map((item) => {
-                  const normalizedStatus = String(item.status || '').toLowerCase();
-                  const isUsed = normalizedStatus === 'used';
-                  const canCheckIn = normalizedStatus === 'confirmed';
-                  const isUpdating = checkInUpdatingTicketId === item.ticketId;
-                  return (
-                    <tr key={item.ticketId} className="hover:bg-slate-700/50 transition-colors">
-                      <td className="px-4 py-3 text-sm text-white">{item.customerName}</td>
-                      <td className="px-4 py-3 text-sm text-slate-300">{item.phoneNumber || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-slate-300">
-                        <div>{item.tripName}</div>
-                        <div className="text-xs text-slate-400">{item.destination} | {item.departureDate ? new Date(item.departureDate).toLocaleDateString() : '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-300">
-                        <div className="font-mono text-xs">{item.ticketNumber || item.serialNumber}</div>
-                        <div className="text-xs text-slate-500">{item.referenceNumber || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        <span
-                          className={`px-2 py-1 rounded text-xs font-medium ${isUsed ? 'bg-emerald-900/30 text-emerald-400' : 'bg-blue-900/30 text-blue-300'
-                            }`}
-                        >
-                          {isUsed ? 'used' : item.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        <Button
-                          onClick={() => checkInTicket(item.ticketId)}
-                          disabled={!canCheckIn || isUpdating}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                        >
-                          {isUpdating ? 'Checking...' : isUsed ? 'Checked In' : 'Check In'}
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </Card>
-
-      {canManualSell ? (
-        <Card className="bg-slate-800 border-slate-700 p-5 mb-6">
-          <h2 className="text-lg font-semibold text-white mb-3">Manual Ticket Sale (Non-Telegram Customers)</h2>
-          <p className="text-sm text-slate-400 mb-4">
-            Use this for walk-in or offline customers. The ticket is issued instantly and seat inventory is updated.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-            <select
-              value={manualSaleTripId}
-              onChange={(e) => setManualSaleTripId(e.target.value)}
-              className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {canManualSell ? (
+            <a
+              href="/admin/tickets/manual-sale"
+              className="rounded-lg border border-slate-600 bg-slate-900/70 p-3 text-sm text-slate-100 hover:border-cyan-500"
             >
-              <option value="">Select trip</option>
-              {manualSaleTrips.map((trip) => (
-                <option key={trip.id} value={trip.id}>
-                  {trip.name || 'Trip'} | {trip.destination || 'N/A'} | seats {Number(trip.available_seats || 0)}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={manualSaleCustomerName}
-              onChange={(e) => setManualSaleCustomerName(e.target.value)}
-              placeholder="Customer full name"
-              className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
-            />
-            <input
-              type="text"
-              value={manualSaleCustomerPhone}
-              onChange={(e) => setManualSaleCustomerPhone(e.target.value)}
-              placeholder="Customer phone number"
-              className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-3">
-            <input
-              type="number"
-              min={1}
-              value={manualSaleQuantity}
-              onChange={(e) => setManualSaleQuantity(Math.max(1, Number(e.target.value || 1)))}
-              placeholder="Quantity"
-              className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
-            />
-            <select
-              value={manualSalePaymentMethod}
-              onChange={(e) => setManualSalePaymentMethod(e.target.value)}
-              className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
-            >
-              <option value="cash">Cash</option>
-              <option value="bank">Bank Transfer</option>
-              <option value="telebirr">Telebirr Manual</option>
-            </select>
-            <input
-              type="number"
-              step="0.01"
-              min={0}
-              value={manualSaleAmount}
-              onChange={(e) => setManualSaleAmount(e.target.value)}
-              placeholder="Amount paid"
-              className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
-            />
-            <input
-              type="text"
-              value={manualSaleReference}
-              onChange={(e) => setManualSaleReference(e.target.value)}
-              placeholder="Payment reference"
-              className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
-            />
-            <Button
-              onClick={submitManualSale}
-              disabled={manualSaleLoading}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-            >
-              {manualSaleLoading ? 'Processing...' : 'Issue Ticket'}
-            </Button>
-          </div>
-
-          <textarea
-            value={manualSaleNotes}
-            onChange={(e) => setManualSaleNotes(e.target.value)}
-            rows={2}
-            placeholder="Notes (optional)"
-            className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
-          />
-
-          {selectedManualSaleTrip ? (
-            <p className="text-xs text-slate-400 mt-2">
-              Selected trip price: ETB {Number(selectedManualSaleTrip.price_per_ticket || 0).toFixed(2)} | available
-              seats: {Number(selectedManualSaleTrip.available_seats || 0)}
-            </p>
+              <p className="font-semibold">Manual Ticket Sale</p>
+              <p className="text-xs text-slate-400 mt-1">Issue tickets for walk-in and offline customers.</p>
+            </a>
           ) : null}
-          {manualSaleError ? <p className="text-sm text-red-400 mt-2">{manualSaleError}</p> : null}
-          {manualSaleNotice ? <p className="text-sm text-emerald-400 mt-2">{manualSaleNotice}</p> : null}
-        </Card>
-      ) : null}
+          <a
+            href="/admin/tickets/manual-checkin"
+            className="rounded-lg border border-slate-600 bg-slate-900/70 p-3 text-sm text-slate-100 hover:border-cyan-500"
+          >
+            <p className="font-semibold">Manual Check-In</p>
+            <p className="text-xs text-slate-400 mt-1">Search by phone and check in confirmed tickets.</p>
+          </a>
+          <a
+            href="/admin/checkin"
+            className="rounded-lg border border-slate-600 bg-slate-900/70 p-3 text-sm text-slate-100 hover:border-cyan-500"
+          >
+            <p className="font-semibold">Check-In Scanner</p>
+            <p className="text-xs text-slate-400 mt-1">Scan QR tickets at boarding/checkpoint.</p>
+          </a>
+        </div>
+      </Card>
 
       <div className="flex gap-2 mb-6">
         {(['all', 'pending', 'approved', 'rejected'] as const).map((f) => (

@@ -3,6 +3,7 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { verifyTelegramMiniAppInitData } from '@/lib/telegram-miniapp';
 import { computeGnplAccountSnapshot } from '@/lib/gnpl';
+import { getMiniAppMaintenanceMessage, getMiniAppRuntimeSettings } from '@/lib/miniapp-access';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -54,6 +55,14 @@ export async function GET(request: NextRequest) {
     }
 
     const client = await getPrimaryClient();
+    const appSettings = await getMiniAppRuntimeSettings(client);
+    if (appSettings.maintenanceMode) {
+      return NextResponse.json(
+        { ok: false, error: 'MINIAPP_MAINTENANCE', message: getMiniAppMaintenanceMessage(appSettings) },
+        { status: 503 }
+      );
+    }
+
     const { data: accounts, error } = await client
       .from('gnpl_accounts')
       .select(
@@ -152,6 +161,14 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await getPrimaryClient();
+    const appSettings = await getMiniAppRuntimeSettings(client);
+    if (appSettings.maintenanceMode) {
+      return NextResponse.json(
+        { ok: false, error: 'MINIAPP_MAINTENANCE', message: getMiniAppMaintenanceMessage(appSettings) },
+        { status: 503 }
+      );
+    }
+
     const { data: account, error: accountError } = await client
       .from('gnpl_accounts')
       .select('*')
@@ -204,4 +221,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });
   }
 }
-

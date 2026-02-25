@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireAdminPermission } from '@/lib/admin-rbac';
-import { resolveAdminId, writeAdminAuditLog } from '@/lib/admin-audit';
+import { writeAdminAuditLog } from '@/lib/admin-audit';
 import { allocateGnplPayment, computeGnplAccountSnapshot, normalizeGnplSettings } from '@/lib/gnpl';
 import { generateTicketNumber, generateTripSerialNumber, sendTelegramMessage } from '@/lib/telegram';
 import { generateTicketQRCode } from '@/lib/qr-code';
@@ -226,12 +226,7 @@ export async function POST(request: NextRequest) {
     const action = safeString(body?.action).toLowerCase();
     const accountId = safeString(body?.accountId);
     const paymentId = safeString(body?.paymentId);
-    const explicitAdminId = safeString(body?.adminId) || auth.actor.id;
-    const adminId = await resolveAdminId(supabase, request, explicitAdminId);
-
-    if (!adminId) {
-      return NextResponse.json({ ok: false, error: 'Admin identity is required' }, { status: 401 });
-    }
+    const adminId = auth.actor.id;
 
     if (!['approve_application', 'reject_application', 'approve_payment', 'reject_payment'].includes(action)) {
       return NextResponse.json({ ok: false, error: 'Invalid action' }, { status: 400 });

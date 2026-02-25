@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Heart, CheckCircle, XCircle, Download, Loader, Plus, Mail, FileText } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -46,6 +46,37 @@ export default function CharityPage() {
     description: '',
     goal_amount: '',
   })
+
+  const summary = useMemo(() => {
+    const totalCampaigns = campaigns.length
+    const activeCampaigns = campaigns.filter((campaign) => {
+      const status = String(campaign.status || '').toLowerCase()
+      return !['closed', 'completed', 'inactive', 'archived'].includes(status)
+    }).length
+    const totalGoal = campaigns.reduce((sum, campaign) => sum + Number(campaign.goal_amount || 0), 0)
+    const totalCollected = campaigns.reduce((sum, campaign) => sum + Number(campaign.collected_amount || 0), 0)
+    const totalDonations = donations.length
+    const pendingDonations = donations.filter((d) => d.approval_status === 'pending').length
+    const approvedDonations = donations.filter((d) => d.approval_status === 'approved').length
+    const rejectedDonations = donations.filter((d) => d.approval_status === 'rejected').length
+    const approvedAmount = donations
+      .filter((d) => d.approval_status === 'approved')
+      .reduce((sum, donation) => sum + Number(donation.donation_amount || 0), 0)
+    const approvalRate = totalDonations > 0 ? (approvedDonations / totalDonations) * 100 : 0
+
+    return {
+      totalCampaigns,
+      activeCampaigns,
+      totalGoal,
+      totalCollected,
+      totalDonations,
+      pendingDonations,
+      approvedDonations,
+      rejectedDonations,
+      approvedAmount,
+      approvalRate,
+    }
+  }, [campaigns, donations])
 
   useEffect(() => {
     loadData()
@@ -204,6 +235,45 @@ export default function CharityPage() {
           <Heart className="w-8 h-8 text-red-500" />
           Charity Management
         </h1>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <Card className="bg-slate-900/50 border-slate-700">
+          <CardHeader className="pb-2">
+            <CardDescription>Total Campaigns</CardDescription>
+            <CardTitle className="text-2xl">{summary.totalCampaigns}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-slate-400">
+            Active: {summary.activeCampaigns}
+          </CardContent>
+        </Card>
+        <Card className="bg-slate-900/50 border-slate-700">
+          <CardHeader className="pb-2">
+            <CardDescription>Campaign Collection</CardDescription>
+            <CardTitle className="text-2xl">ETB {summary.totalCollected.toLocaleString()}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-slate-400">
+            Goal: ETB {summary.totalGoal.toLocaleString()}
+          </CardContent>
+        </Card>
+        <Card className="bg-slate-900/50 border-slate-700">
+          <CardHeader className="pb-2">
+            <CardDescription>Donations</CardDescription>
+            <CardTitle className="text-2xl">{summary.totalDonations}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-slate-400">
+            Pending: {summary.pendingDonations} | Approved: {summary.approvedDonations}
+          </CardContent>
+        </Card>
+        <Card className="bg-slate-900/50 border-slate-700">
+          <CardHeader className="pb-2">
+            <CardDescription>Approved Amount</CardDescription>
+            <CardTitle className="text-2xl">ETB {summary.approvedAmount.toLocaleString()}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-slate-400">
+            Approval rate: {summary.approvalRate.toFixed(1)}% | Rejected: {summary.rejectedDonations}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="flex gap-2 border-b border-slate-700">

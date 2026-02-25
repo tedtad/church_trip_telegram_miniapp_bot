@@ -100,10 +100,12 @@ function normalizeDiscountCodeInput(value: string) {
 export default function CharityPage() {
   const [lang, setLang] = useState<Lang>('am');
   const [initData, setInitData] = useState('');
+  const [appName, setAppName] = useState('TicketHub');
   const [invitationCode, setInvitationCode] = useState('');
   const [campaignHintId, setCampaignHintId] = useState('');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [accessMessage, setAccessMessage] = useState('');
   const [donation, setDonation] = useState<DonationStep>({
     step: 1,
     donorName: '',
@@ -132,7 +134,7 @@ export default function CharityPage() {
       const res = await apiFetch('/api/charity/campaigns');
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data?.error || data?.message || 'Failed to load campaigns');
+        throw new Error(data?.message || data?.error || 'Failed to load campaigns');
       }
       setCampaigns((data.campaigns || []) as Campaign[]);
     } catch (err) {
@@ -141,6 +143,42 @@ export default function CharityPage() {
       setLoading(false);
     }
   }, [apiFetch]);
+
+  const ensureMiniAppCharityAccess = useCallback(async (resolvedInitData: string) => {
+    try {
+      const response = await fetch('/api/miniapp/session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(resolvedInitData ? { 'x-telegram-init-data': resolvedInitData } : {}),
+        },
+        body: JSON.stringify({ initData: resolvedInitData }),
+        cache: 'no-store',
+      });
+      const json = await response.json().catch(() => ({}));
+      const sessionSettings = (json?.appSettings || {}) as Record<string, unknown>;
+      setAppName(String(sessionSettings?.appName || 'TicketHub'));
+
+      if (!response.ok || !json?.ok) {
+        if (String(json?.error || '') === 'MINIAPP_MAINTENANCE') {
+          setAccessMessage(String(json?.message || 'Mini App is under maintenance.'));
+          return false;
+        }
+        setAccessMessage(String(json?.error || json?.message || 'Mini App session is not available.'));
+        return false;
+      }
+
+      if (sessionSettings?.charityEnabled === false) {
+        setAccessMessage('Charity module is currently disabled.');
+        return false;
+      }
+
+      return true;
+    } catch {
+      setAccessMessage('Failed to validate mini app session.');
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
     const resolved = resolveInitDataFromPage();
@@ -161,11 +199,16 @@ export default function CharityPage() {
       }
       setLang(String(tgUser.language_code || '').toLowerCase() === 'en' ? 'en' : 'am');
     }
-  }, []);
 
-  useEffect(() => {
-    loadCampaigns();
-  }, [loadCampaigns]);
+    (async () => {
+      const allowed = await ensureMiniAppCharityAccess(resolved);
+      if (!allowed) {
+        setLoading(false);
+        return;
+      }
+      await loadCampaigns();
+    })();
+  }, [ensureMiniAppCharityAccess, loadCampaigns]);
 
   useEffect(() => {
     if (!campaignHintId || campaigns.length === 0) return;
@@ -236,6 +279,23 @@ export default function CharityPage() {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
         <Loader className="w-8 h-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (accessMessage) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white p-4">
+        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
+        <div className="max-w-xl mx-auto space-y-4 pt-10 text-center">
+          <h1 className="text-2xl font-semibold">{appName}</h1>
+          <div className="rounded-lg border border-amber-400 bg-amber-900/30 p-4">
+            <p className="text-amber-100">{accessMessage}</p>
+          </div>
+          <Link href="/miniapp" className="text-sm text-blue-400 hover:text-blue-300">
+            ← {t('backHome')}
+          </Link>
+        </div>
       </div>
     );
   }

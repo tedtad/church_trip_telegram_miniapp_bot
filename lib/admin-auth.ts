@@ -1,4 +1,3 @@
-import { createClient } from '@/lib/supabase/client';
 import { AdminUser } from '@/lib/types';
 
 const ADMIN_SESSION_KEY = 'tickethub_admin_session';
@@ -9,53 +8,88 @@ export interface AdminSession {
   expiresAt: number;
 }
 
-export async function adminLogin(email: string, password: string): Promise<{ success: boolean; admin?: AdminUser; error?: string }> {
-  try {
-    const supabase = createClient();
-
-    // Sign in with Supabase Auth (using email/password)
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (authError || !authData.user) {
-      return {
-        success: false,
-        error: 'Invalid email or password',
-      };
+export type AdminLoginStartResult =
+  | {
+      success: true;
+      requiresOtp: true;
+      challengeId: string;
+      expiresInSeconds: number;
+      telegram: string;
+      admin: AdminUser;
     }
-
-    // Check if user is an admin
-    const { data: adminData, error: adminError } = await supabase
-      .from('admin_users')
-      .select('*')
-      .eq('email', email)
-      .single();
-
-    if (adminError || !adminData) {
-      // Sign out the non-admin user
-      await supabase.auth.signOut();
-      return {
-        success: false,
-        error: 'You do not have admin privileges',
-      };
+  | {
+      success: true;
+      requiresOtp: false;
+      admin: AdminUser;
+      expiresAt: number;
     }
-
-    // Store admin session
-    const session: AdminSession = {
-      admin: adminData,
-      token: authData.session?.access_token || '',
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+  | {
+      success: false;
+      error: string;
     };
 
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session));
+function toAdminUser(input: any): AdminUser {
+  return {
+    id: String(input?.id || ''),
+    email: String(input?.email || ''),
+    name: String(input?.name || input?.email || ''),
+    role: (String(input?.role || 'admin') as AdminUser['role']),
+    is_active: true,
+    created_at: String(input?.created_at || new Date().toISOString()),
+    last_login: String(input?.last_login || ''),
+  };
+}
+
+function persistAdminSession(admin: AdminUser, expiresAt: number) {
+  const session: AdminSession = {
+    admin,
+    token: 'cookie',
+    expiresAt,
+  };
+
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session));
+  }
+
+  return session;
+}
+
+export async function adminLogin(email: string, password: string): Promise<AdminLoginStartResult> {
+  try {
+    const response = await fetch('/api/admin/auth/login/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ email, password }),
+    });
+
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || !json?.success) {
+      return {
+        success: false,
+        error: String(json?.error || 'Invalid email or password.'),
+      };
     }
 
+    const admin = toAdminUser(json.admin || {});
+    if (json.requiresOtp) {
+      return {
+        success: true,
+        requiresOtp: true,
+        challengeId: String(json.challengeId || ''),
+        expiresInSeconds: Number(json.expiresInSeconds || 0),
+        telegram: String(json.telegram || ''),
+        admin,
+      };
+    }
+
+    const expiresAt = Number(json.expiresAt || Date.now() + 12 * 60 * 60 * 1000);
+    persistAdminSession(admin, expiresAt);
     return {
       success: true,
-      admin: adminData,
+      requiresOtp: false,
+      admin,
+      expiresAt,
     };
   } catch (error) {
     console.error('[admin-auth] Login error:', error);
@@ -66,16 +100,78 @@ export async function adminLogin(email: string, password: string): Promise<{ suc
   }
 }
 
+export async function adminVerifyOtp(challengeId: string, otp: string) {
+  try {
+    const response = await fetch('/api/admin/auth/login/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ challengeId, otp }),
+    });
+
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || !json?.success) {
+      return {
+        success: false,
+        error: String(json?.error || 'Invalid verification code.'),
+      };
+    }
+
+    const admin = toAdminUser(json.admin || {});
+    const expiresAt = Number(json.expiresAt || Date.now() + 12 * 60 * 60 * 1000);
+    persistAdminSession(admin, expiresAt);
+
+    return {
+      success: true,
+      admin,
+      expiresAt,
+    };
+  } catch (error) {
+    console.error('[admin-auth] OTP verify error:', error);
+    return {
+      success: false,
+      error: 'Failed to verify OTP code.',
+    };
+  }
+}
+
+export async function refreshAdminSession() {
+  try {
+    const response = await fetch('/api/admin/auth/session', {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+    });
+
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || !json?.success) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(ADMIN_SESSION_KEY);
+      }
+      return null;
+    }
+
+    const admin = toAdminUser(json.admin || {});
+    const expiresAt = Number(json.expiresAt || Date.now() + 60 * 60 * 1000);
+    return persistAdminSession(admin, expiresAt);
+  } catch (error) {
+    console.error('[admin-auth] refresh session error:', error);
+    return null;
+  }
+}
+
 export async function adminLogout(): Promise<void> {
   try {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-
+    await fetch('/api/admin/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch (error) {
+    console.error('[admin-auth] Logout API error:', error);
+  } finally {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(ADMIN_SESSION_KEY);
     }
-  } catch (error) {
-    console.error('[admin-auth] Logout error:', error);
   }
 }
 
@@ -88,7 +184,6 @@ export function getAdminSession(): AdminSession | null {
 
     const session = JSON.parse(sessionStr) as AdminSession;
 
-    // Check if session expired
     if (session.expiresAt < Date.now()) {
       localStorage.removeItem(ADMIN_SESSION_KEY);
       return null;

@@ -8,9 +8,13 @@ import { generateTicketQRCode } from '@/lib/qr-code';
 import { writeAdminAuditLog } from '@/lib/admin-audit';
 
 function normalizeReference(raw: unknown) {
-  const value = String(raw || '').trim();
-  const token = (value.match(/[A-Za-z0-9_-]{3,80}/g) || [])[0] || '';
-  return token;
+  return String(raw || '').trim().slice(0, 120);
+}
+
+function buildManualReferenceFallback() {
+  const tail = Date.now().toString().slice(-8);
+  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `MANUAL${tail}${random}`;
 }
 
 function detectMissingColumn(error: unknown): string | null {
@@ -64,8 +68,6 @@ export async function POST(request: NextRequest) {
     if (!tripId) return NextResponse.json({ ok: false, error: 'tripId is required' }, { status: 400 });
     if (!customerName) return NextResponse.json({ ok: false, error: 'customerName is required' }, { status: 400 });
     if (!customerPhone) return NextResponse.json({ ok: false, error: 'customerPhone is required' }, { status: 400 });
-    if (!reference) return NextResponse.json({ ok: false, error: 'Valid reference number is required' }, { status: 400 });
-
     const { data: trip, error: tripError } = await supabase
       .from('trips')
       .select('id, name, price_per_ticket, available_seats, status, trip_status')
@@ -92,15 +94,6 @@ export async function POST(request: NextRequest) {
       languageCode: 'en',
     });
 
-    const duplicateCheck = await supabase
-      .from('receipts')
-      .select('id, reference_number')
-      .or(`reference_number.eq.${reference},reference_number.ilike.${reference}-%`)
-      .limit(1);
-    if (!duplicateCheck.error && (duplicateCheck.data || []).length > 0) {
-      return NextResponse.json({ ok: false, error: 'Reference number already exists' }, { status: 409 });
-    }
-
     const unitPrice = Number((trip as any).price_per_ticket || 0);
     const expectedAmount = Number((unitPrice * quantity).toFixed(2));
     const amountPaidInput = Number(body?.amountPaid || expectedAmount);
@@ -112,7 +105,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const uniqueReference = `${reference}-${Date.now().toString().slice(-6)}`;
+    const referenceBase = reference || buildManualReferenceFallback();
+    const uniqueReference = `${referenceBase}-${Date.now().toString().slice(-6)}`;
     const receiptHash = createHash('sha256')
       .update(`${reference}:${customerUserId}:${quantity}:${Date.now()}`)
       .digest('hex');

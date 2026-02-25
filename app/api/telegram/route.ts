@@ -13,6 +13,10 @@ import {
 } from '@/lib/telegram';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { formatBankAccounts, getTripManualPaymentConfig } from '@/lib/payment-config';
+import {
+  ONBOARDING_MAX_ATTEMPTS,
+  verifyOnboardingOtp,
+} from '@/lib/admin-onboarding';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -276,6 +280,260 @@ function getServiceSupabaseClient() {
 
 async function getPrimaryClient() {
   return getServiceSupabaseClient() || (await createServerClient());
+}
+
+function extractStartPayload(text: string | undefined) {
+  const normalized = String(text || '').trim();
+  if (!normalized.toLowerCase().startsWith('/start')) return '';
+  const parts = normalized.split(/\s+/);
+  if (parts.length < 2) return '';
+  return String(parts[1] || '').trim();
+}
+
+function parseActivateCommand(text: string | undefined) {
+  const normalized = String(text || '').trim();
+  if (!normalized.toLowerCase().startsWith('/activate')) return null;
+  const parts = normalized.split(/\s+/);
+  if (parts.length < 4) return null;
+  return {
+    otp: String(parts[1] || '').trim(),
+    username: String(parts[2] || '').trim(),
+    newPassword: String(parts[3] || '').trim(),
+  };
+}
+
+function validateActivationInput(input: { otp: string; username: string; newPassword: string }) {
+  if (!/^\d{6}$/.test(input.otp)) return 'OTP must be 6 digits.';
+  if (!/^[a-zA-Z0-9_]{3,32}$/.test(input.username)) {
+    return 'Username must be 3-32 chars (letters, numbers, underscore).';
+  }
+  if (input.newPassword.length < 10) return 'Password must be at least 10 characters.';
+  if (!/[A-Z]/.test(input.newPassword)) return 'Password must include an uppercase letter.';
+  if (!/[a-z]/.test(input.newPassword)) return 'Password must include a lowercase letter.';
+  if (!/\d/.test(input.newPassword)) return 'Password must include a number.';
+  return '';
+}
+
+async function findOnboardingByToken(client: any, token: string) {
+  const { data, error } = await client
+    .from('admin_user_onboarding')
+    .select('id, admin_id, email, onboarding_token, otp_hash, status, attempts, max_attempts, locked_until, expires_at')
+    .eq('onboarding_token', token)
+    .maybeSingle();
+  if (error) throw error;
+  return data as
+    | {
+        id: string;
+        admin_id: string;
+        email: string;
+        onboarding_token: string;
+        otp_hash: string;
+        status: string;
+        attempts: number | null;
+        max_attempts: number | null;
+        locked_until: string | null;
+        expires_at: string;
+      }
+    | null;
+}
+
+async function findLatestOnboardingByTelegramUser(client: any, telegramUserId: number) {
+  const { data, error } = await client
+    .from('admin_user_onboarding')
+    .select('id, admin_id, email, onboarding_token, otp_hash, status, attempts, max_attempts, locked_until, expires_at')
+    .eq('telegram_user_id', telegramUserId)
+    .in('status', ['pending', 'linked', 'reset'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data as
+    | {
+        id: string;
+        admin_id: string;
+        email: string;
+        onboarding_token: string;
+        otp_hash: string;
+        status: string;
+        attempts: number | null;
+        max_attempts: number | null;
+        locked_until: string | null;
+        expires_at: string;
+      }
+    | null;
+}
+
+async function handleOnboardingStart(chatId: number, userId: number, payload: string) {
+  if (!payload.startsWith('onboard_')) return false;
+
+  const token = payload.replace(/^onboard_/i, '').trim();
+  if (!token) {
+    await sendTelegramMessage(chatId, 'Invalid onboarding token.');
+    return true;
+  }
+
+  const client = await getPrimaryClient();
+  const onboarding = await findOnboardingByToken(client, token).catch(() => null);
+  if (!onboarding) {
+    await sendTelegramMessage(chatId, 'Onboarding token was not found. Request a new reset from admin.');
+    return true;
+  }
+
+  const status = String(onboarding.status || 'pending').toLowerCase();
+  if (status === 'completed') {
+    await sendTelegramMessage(chatId, 'This onboarding link was already completed.');
+    return true;
+  }
+  if (status === 'locked') {
+    await sendTelegramMessage(chatId, 'This onboarding link is locked. Contact admin for reset.');
+    return true;
+  }
+  if (status !== 'pending' && status !== 'linked' && status !== 'reset') {
+    await sendTelegramMessage(chatId, 'This onboarding link is no longer active.');
+    return true;
+  }
+
+  const expiresAt = new Date(onboarding.expires_at || 0).getTime();
+  if (!expiresAt || Number.isNaN(expiresAt) || expiresAt <= Date.now()) {
+    await client
+      .from('admin_user_onboarding')
+      .update({ status: 'expired', updated_at: new Date().toISOString() })
+      .eq('id', onboarding.id);
+    await sendTelegramMessage(chatId, 'This onboarding link has expired. Ask admin to reset your account.');
+    return true;
+  }
+
+  const lockedUntil = onboarding.locked_until ? new Date(onboarding.locked_until).getTime() : 0;
+  if (lockedUntil && lockedUntil > Date.now()) {
+    await sendTelegramMessage(chatId, 'This onboarding link is temporarily locked. Try later or contact admin.');
+    return true;
+  }
+
+  await client
+    .from('admin_user_onboarding')
+    .update({
+      telegram_user_id: userId,
+      status: 'linked',
+      locked_until: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', onboarding.id);
+
+  await sendTelegramMessage(
+    chatId,
+    'Account link verified. Send:\n/activate <otp> <username> <new_password>\nExample: /activate 123456 teddy_admin StrongPass!234'
+  );
+  return true;
+}
+
+async function handleOnboardingActivate(chatId: number, userId: number, text: string | undefined) {
+  const command = parseActivateCommand(text);
+  if (!command) return false;
+
+  const validationError = validateActivationInput(command);
+  if (validationError) {
+    await sendTelegramMessage(chatId, validationError);
+    return true;
+  }
+
+  const client = await getPrimaryClient();
+  const onboarding = await findLatestOnboardingByTelegramUser(client, userId).catch(() => null);
+  if (!onboarding) {
+    await sendTelegramMessage(chatId, 'No active onboarding session found. Start again from your onboarding link.');
+    return true;
+  }
+
+  const maxAttempts = Math.max(1, Number(onboarding.max_attempts || ONBOARDING_MAX_ATTEMPTS));
+  const attempts = Math.max(0, Number(onboarding.attempts || 0));
+  const expiresAt = new Date(onboarding.expires_at || 0).getTime();
+  const lockedUntil = onboarding.locked_until ? new Date(onboarding.locked_until).getTime() : 0;
+
+  if (lockedUntil && lockedUntil > Date.now()) {
+    await sendTelegramMessage(chatId, 'Your onboarding is locked after multiple failed attempts. Contact admin.');
+    return true;
+  }
+
+  if (!expiresAt || Number.isNaN(expiresAt) || expiresAt <= Date.now()) {
+    await client
+      .from('admin_user_onboarding')
+      .update({ status: 'expired', updated_at: new Date().toISOString() })
+      .eq('id', onboarding.id);
+    await sendTelegramMessage(chatId, 'Onboarding OTP expired. Ask admin to reset your account.');
+    return true;
+  }
+
+  const validOtp = verifyOnboardingOtp(onboarding.onboarding_token, command.otp, onboarding.otp_hash);
+  if (!validOtp) {
+    const nextAttempts = attempts + 1;
+    const lockNow = nextAttempts >= maxAttempts;
+    const lockUntilIso = lockNow ? new Date(Date.now() + 30 * 60 * 1000).toISOString() : null;
+
+    await client
+      .from('admin_user_onboarding')
+      .update({
+        attempts: nextAttempts,
+        status: lockNow ? 'locked' : 'linked',
+        locked_until: lockUntilIso,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', onboarding.id);
+
+    if (lockNow) {
+      await sendTelegramMessage(chatId, 'Too many invalid OTP attempts. Account is locked. Contact admin.');
+    } else {
+      await sendTelegramMessage(chatId, `Invalid OTP. Remaining attempts: ${Math.max(0, maxAttempts - nextAttempts)}.`);
+    }
+    return true;
+  }
+
+  const serviceClient = getServiceSupabaseClient();
+  if (!serviceClient) {
+    await sendTelegramMessage(chatId, 'Server setup incomplete. Missing service role key.');
+    return true;
+  }
+
+  const updateAuth = await serviceClient.auth.admin.updateUserById(onboarding.admin_id, {
+    password: command.newPassword,
+    user_metadata: {
+      username: command.username,
+      telegram_user_id: userId,
+    },
+  });
+  if (updateAuth.error) {
+    await sendTelegramMessage(chatId, 'Failed to activate account. Please contact admin.');
+    return true;
+  }
+
+  await client
+    .from('admin_users')
+    .update({
+      telegram_user_id: userId,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', onboarding.admin_id);
+
+  await client
+    .from('admin_user_onboarding')
+    .update({
+      status: 'completed',
+      username: command.username,
+      attempts: attempts + 1,
+      completed_at: new Date().toISOString(),
+      locked_until: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', onboarding.id);
+
+  await client
+    .from('admin_user_onboarding')
+    .update({ status: 'expired', updated_at: new Date().toISOString() })
+    .eq('admin_id', onboarding.admin_id)
+    .in('status', ['pending', 'linked', 'reset'])
+    .neq('id', onboarding.id);
+
+  await sendTelegramMessage(chatId, 'Account activated successfully. You can now log in to the admin panel.');
+  return true;
 }
 
 function fallbackLang(languageCode?: string): Lang {
@@ -991,13 +1249,18 @@ async function sendMiniAppEntry(chatId: number, lang: Lang) {
   );
 }
 
-async function handleStartCommand(message: TelegramMessage, lang: Lang) {
+async function handleStartCommand(message: TelegramMessage, lang: Lang, startPayload = '') {
   const chatId = message.message!.chat.id;
   const from = message.message!.from;
   const txt = i18n[lang];
 
   await upsertTelegramUser(message);
   await ensureUserChannel(from.id, from.username);
+
+  if (startPayload) {
+    const onboardingHandled = await handleOnboardingStart(chatId, from.id, startPayload);
+    if (onboardingHandled) return;
+  }
 
   await sendTelegramMessage(chatId, txt.welcome(from.first_name), {
     reply_markup: getMainMenu(lang),
@@ -1290,7 +1553,8 @@ async function handleMessage(update: TelegramMessage) {
     return;
   }
 
-  const normalized = (msg.text || '').trim().toLowerCase();
+  const rawText = String(msg.text || '').trim();
+  const normalized = rawText.toLowerCase();
   const menuLang = detectMenuLanguage(normalized);
   const effectiveLang: Lang = menuLang || lang;
   const txt = i18n[effectiveLang];
@@ -1300,7 +1564,13 @@ async function handleMessage(update: TelegramMessage) {
   }
 
   if (normalized === '/start' || normalized.startsWith('/start')) {
-    await handleStartCommand(update, lang);
+    const startPayload = extractStartPayload(rawText);
+    await handleStartCommand(update, lang, startPayload);
+    return;
+  }
+
+  if (normalized.startsWith('/activate')) {
+    if (await handleOnboardingActivate(chatId, userId, rawText)) return;
     return;
   }
 

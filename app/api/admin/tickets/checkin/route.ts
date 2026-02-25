@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { resolveAdminId, writeAdminAuditLog } from '@/lib/admin-audit';
+import { writeAdminAuditLog } from '@/lib/admin-audit';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 
 type TelegramUserRow = {
   id: string | number;
@@ -129,6 +130,14 @@ export async function GET(request: NextRequest) {
     const tripDate = normalizeDateYmd(request.nextUrl.searchParams.get('tripDate') || '');
 
     const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'tickets_checkin',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
     let rows: TicketRow[] = [];
 
     if (ticketId) {
@@ -223,7 +232,15 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = await createAdminClient();
-    const adminId = await resolveAdminId(supabase, request, String(body?.adminId || '').trim() || null);
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'tickets_checkin',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
+    const adminId = auth.actor.id;
     const { data: ticket, error: ticketError } = await supabase
       .from('tickets')
       .select(

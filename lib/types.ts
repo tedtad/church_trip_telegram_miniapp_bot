@@ -76,8 +76,11 @@ export interface AdminUser {
   id: string;
   email: string;
   name: string;
+  phone_number?: string;
   role: 'system_admin' | 'admin' | 'moderator' | 'analyst' | 'sales_agent' | 'user';
   is_active: boolean;
+  telegram_user_id?: number | null;
+  two_factor_enabled?: boolean;
   created_at: string;
   last_login?: string;
 }

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { getAdminSession, adminLogout } from '@/lib/admin-auth';
+import { getAdminSession, adminLogout, refreshAdminSession } from '@/lib/admin-auth';
 import { AdminPermission, hasAdminPermission, normalizeAdminRole } from '@/lib/admin-rbac';
 import { Button } from '@/components/ui/button';
-import { LayoutDashboard, Users, Ticket, MapPin, LogOut, Menu, X, BarChart3, Database, Link as LinkIcon, Zap, Bot, QrCode, Tag, Settings, Heart, Wallet } from 'lucide-react';
+import { LayoutDashboard, Users, Ticket, MapPin, LogOut, Menu, X, BarChart3, Database, Link as LinkIcon, Zap, Bot, QrCode, Tag, Settings, Heart, Wallet, Shield } from 'lucide-react';
 
 export default function AdminLayout({
   children,
@@ -21,18 +21,32 @@ export default function AdminLayout({
   const [adminRole, setAdminRole] = useState('admin');
 
   useEffect(() => {
-    const session = getAdminSession();
-    if (!session) {
-      // Only redirect if not on login page
-      if (!pathname?.includes('/login')) {
-        router.push('/admin/login');
+    let mounted = true;
+    const run = async () => {
+      let session = getAdminSession();
+      if (!session) {
+        session = await refreshAdminSession();
       }
-    } else {
-      setAuthenticated(true);
-      setAdminName(session.admin.name || session.admin.email);
-      setAdminRole(normalizeAdminRole(session.admin.role));
-    }
-    setLoading(false);
+
+      if (!mounted) return;
+
+      if (!session) {
+        setAuthenticated(false);
+        if (!pathname?.includes('/login')) {
+          router.push('/admin/login');
+        }
+      } else {
+        setAuthenticated(true);
+        setAdminName(session.admin.name || session.admin.email);
+        setAdminRole(normalizeAdminRole(session.admin.role));
+      }
+      setLoading(false);
+    };
+
+    run();
+    return () => {
+      mounted = false;
+    };
   }, [pathname, router]);
 
   if (loading) {
@@ -53,7 +67,9 @@ export default function AdminLayout({
 
   const navItems: Array<{ icon: any; label: string; href: string; permission: AdminPermission }> = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/admin/dashboard', permission: 'dashboard_view' },
-    { icon: Ticket, label: 'Tickets', href: '/admin/tickets', permission: 'tickets_review' },
+    { icon: Ticket, label: 'Ticket Approval', href: '/admin/tickets', permission: 'tickets_review' },
+    { icon: Ticket, label: 'Manual Ticket Sale', href: '/admin/tickets/manual-sale', permission: 'tickets_manual_sale' },
+    { icon: Ticket, label: 'Manual Check-In', href: '/admin/tickets/manual-checkin', permission: 'tickets_checkin' },
     { icon: QrCode, label: 'Check-In Scanner', href: '/admin/checkin', permission: 'tickets_checkin' },
     { icon: Users, label: 'Customers', href: '/admin/customers', permission: 'customers_view' },
     { icon: MapPin, label: 'Trips', href: '/admin/trips', permission: 'trips_manage' },
@@ -67,12 +83,15 @@ export default function AdminLayout({
     { icon: Database, label: 'Backups', href: '/admin/backups', permission: 'backups_manage' },
     { icon: Database, label: 'Reconciliation', href: '/admin/reconciliation', permission: 'reconciliation_view' },
     { icon: Database, label: 'Reports', href: '/admin/reports', permission: 'reports_view' },
-    { icon: Users, label: 'Admin Users', href: '/admin/users', permission: 'admin_users_manage' },
+    { icon: Users, label: 'User Management', href: '/admin/users', permission: 'admin_users_manage' },
+    { icon: Shield, label: 'RBAC', href: '/admin/rbac', permission: 'admin_users_manage' },
     { icon: Settings, label: 'Settings', href: '/admin/settings', permission: 'settings_manage' },
   ];
   const visibleNavItems = navItems.filter((item) => hasAdminPermission(adminRole, item.permission));
   const routePermissions: Array<{ prefix: string; permission: AdminPermission }> = [
     { prefix: '/admin/dashboard', permission: 'dashboard_view' },
+    { prefix: '/admin/tickets/manual-sale', permission: 'tickets_manual_sale' },
+    { prefix: '/admin/tickets/manual-checkin', permission: 'tickets_checkin' },
     { prefix: '/admin/tickets', permission: 'tickets_review' },
     { prefix: '/admin/checkin', permission: 'tickets_checkin' },
     { prefix: '/admin/customers', permission: 'customers_view' },
@@ -88,6 +107,7 @@ export default function AdminLayout({
     { prefix: '/admin/reconciliation', permission: 'reconciliation_view' },
     { prefix: '/admin/reports', permission: 'reports_view' },
     { prefix: '/admin/users', permission: 'admin_users_manage' },
+    { prefix: '/admin/rbac', permission: 'admin_users_manage' },
     { prefix: '/admin/settings', permission: 'settings_manage' },
   ];
   const currentRoutePermission =
