@@ -139,7 +139,59 @@ CREATE TABLE IF NOT EXISTS telegram_channels (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 11. Database Backups (Track all backup operations)
+-- 11. App Settings
+CREATE TABLE IF NOT EXISTS app_settings (
+  id TEXT PRIMARY KEY,
+  app_name TEXT NOT NULL DEFAULT 'TicketHub',
+  app_description TEXT NOT NULL DEFAULT 'Telegram Ticket Reservation System',
+  app_color TEXT DEFAULT '#06b6d4',
+  logo_url TEXT,
+  logo_filename TEXT,
+  receipt_cache_ttl INTEGER DEFAULT 3600,
+  max_file_size INTEGER DEFAULT 10,
+  supported_file_types TEXT[] DEFAULT ARRAY['image/jpeg', 'image/jpg', 'image/png', 'application/pdf', 'image/webp'],
+  smtp_enabled BOOLEAN DEFAULT FALSE,
+  sms_enabled BOOLEAN DEFAULT FALSE,
+  telegram_notifications_enabled BOOLEAN DEFAULT TRUE,
+  two_factor_enabled BOOLEAN DEFAULT FALSE,
+  maintenance_mode BOOLEAN DEFAULT FALSE,
+  maintenance_message TEXT,
+  telegram_channel_chat_id TEXT,
+  telegram_channel_url TEXT,
+  telegram_channel_name TEXT,
+  telegram_post_new_trip BOOLEAN DEFAULT TRUE,
+  telegram_post_weekly_summary BOOLEAN DEFAULT TRUE,
+  telegram_post_daily_countdown BOOLEAN DEFAULT TRUE,
+  telegram_recommendation_interval_hours INTEGER DEFAULT 24,
+  telegram_last_recommendation_post_at TIMESTAMPTZ,
+  telegram_last_weekly_post_at TIMESTAMPTZ,
+  telegram_last_daily_post_date DATE,
+  charity_channel_chat_id TEXT,
+  charity_channel_url TEXT,
+  charity_group_chat_id TEXT,
+  charity_group_url TEXT,
+  charity_auto_post_new_campaign BOOLEAN DEFAULT TRUE,
+  charity_auto_post_summary BOOLEAN DEFAULT TRUE,
+  charity_last_summary_post_at TIMESTAMPTZ,
+  gnpl_enabled BOOLEAN DEFAULT FALSE,
+  gnpl_require_admin_approval BOOLEAN DEFAULT TRUE,
+  gnpl_default_term_days INTEGER DEFAULT 14,
+  gnpl_penalty_enabled BOOLEAN DEFAULT TRUE,
+  gnpl_penalty_percent NUMERIC(5,2) DEFAULT 5,
+  gnpl_penalty_period_days INTEGER DEFAULT 7,
+  gnpl_reminder_enabled BOOLEAN DEFAULT TRUE,
+  gnpl_reminder_days_before INTEGER DEFAULT 0,
+  receipt_intelligence_enabled BOOLEAN DEFAULT FALSE,
+  receipt_sample_collection_enabled BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+INSERT INTO app_settings (id, app_name, app_description)
+VALUES ('default', 'TicketHub', 'Telegram Ticket Reservation System')
+ON CONFLICT (id) DO NOTHING;
+
+-- 12. Database Backups (Track all backup operations)
 CREATE TABLE IF NOT EXISTS database_backups (
   id TEXT PRIMARY KEY,
   backup_data JSONB,
@@ -162,6 +214,7 @@ CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(telegram_user_id);
 CREATE INDEX IF NOT EXISTS idx_invitations_code ON invitations(invitation_code);
 CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);
+CREATE INDEX IF NOT EXISTS idx_app_settings_updated_at ON app_settings(updated_at);
 CREATE INDEX IF NOT EXISTS idx_backups_created ON database_backups(created_at);
 CREATE INDEX IF NOT EXISTS idx_backups_status ON database_backups(status);
 
@@ -184,4 +237,7 @@ CREATE TRIGGER IF NOT EXISTS update_trips_updated_at BEFORE UPDATE ON trips
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER IF NOT EXISTS update_invitations_updated_at BEFORE UPDATE ON invitations
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER IF NOT EXISTS update_app_settings_updated_at BEFORE UPDATE ON app_settings
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

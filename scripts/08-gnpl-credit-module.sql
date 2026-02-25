@@ -1,8 +1,43 @@
 -- GNPL (Go Now, Pay Later) schema additions
 -- Safe and idempotent migration
 
+-- 0) Baseline table for app-level settings (may be missing in older databases)
+CREATE TABLE IF NOT EXISTS app_settings (
+  id TEXT PRIMARY KEY,
+  app_name TEXT,
+  app_description TEXT,
+  app_color TEXT DEFAULT '#06b6d4',
+  logo_url TEXT,
+  logo_filename TEXT,
+  receipt_cache_ttl INTEGER DEFAULT 3600,
+  max_file_size INTEGER DEFAULT 10,
+  supported_file_types TEXT[] DEFAULT ARRAY['image/jpeg', 'image/jpg', 'image/png', 'application/pdf', 'image/webp'],
+  smtp_enabled BOOLEAN DEFAULT FALSE,
+  sms_enabled BOOLEAN DEFAULT FALSE,
+  telegram_notifications_enabled BOOLEAN DEFAULT TRUE,
+  two_factor_enabled BOOLEAN DEFAULT FALSE,
+  maintenance_mode BOOLEAN DEFAULT FALSE,
+  maintenance_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 1) App-level GNPL configuration
 ALTER TABLE app_settings
+  ADD COLUMN IF NOT EXISTS app_name TEXT,
+  ADD COLUMN IF NOT EXISTS app_description TEXT,
+  ADD COLUMN IF NOT EXISTS app_color TEXT DEFAULT '#06b6d4',
+  ADD COLUMN IF NOT EXISTS logo_url TEXT,
+  ADD COLUMN IF NOT EXISTS logo_filename TEXT,
+  ADD COLUMN IF NOT EXISTS receipt_cache_ttl INTEGER DEFAULT 3600,
+  ADD COLUMN IF NOT EXISTS max_file_size INTEGER DEFAULT 10,
+  ADD COLUMN IF NOT EXISTS supported_file_types TEXT[] DEFAULT ARRAY['image/jpeg', 'image/jpg', 'image/png', 'application/pdf', 'image/webp'],
+  ADD COLUMN IF NOT EXISTS smtp_enabled BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS sms_enabled BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS telegram_notifications_enabled BOOLEAN DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS maintenance_message TEXT,
   ADD COLUMN IF NOT EXISTS gnpl_enabled BOOLEAN DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS gnpl_require_admin_approval BOOLEAN DEFAULT TRUE,
   ADD COLUMN IF NOT EXISTS gnpl_default_term_days INTEGER DEFAULT 14,
@@ -85,4 +120,3 @@ CREATE INDEX IF NOT EXISTS idx_gnpl_accounts_id_number ON gnpl_accounts (id_numb
 CREATE INDEX IF NOT EXISTS idx_gnpl_payments_account_status ON gnpl_payments (gnpl_account_id, status);
 CREATE INDEX IF NOT EXISTS idx_gnpl_payments_reference ON gnpl_payments (payment_reference);
 CREATE INDEX IF NOT EXISTS idx_gnpl_payments_date ON gnpl_payments (payment_date);
-

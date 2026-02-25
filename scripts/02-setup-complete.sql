@@ -217,7 +217,61 @@ CREATE TABLE IF NOT EXISTS telebirr_payments (
 CREATE INDEX idx_telebirr_receipt ON telebirr_payments(receipt_id);
 CREATE INDEX idx_telebirr_status ON telebirr_payments(status);
 
--- 12. Database Backups Log
+-- 12. App Settings
+CREATE TABLE IF NOT EXISTS app_settings (
+  id TEXT PRIMARY KEY,
+  app_name TEXT NOT NULL DEFAULT 'TicketHub',
+  app_description TEXT NOT NULL DEFAULT 'Telegram Ticket Reservation System',
+  app_color TEXT DEFAULT '#06b6d4',
+  logo_url TEXT,
+  logo_filename TEXT,
+  receipt_cache_ttl INTEGER DEFAULT 3600,
+  max_file_size INTEGER DEFAULT 10,
+  supported_file_types TEXT[] DEFAULT ARRAY['image/jpeg', 'image/jpg', 'image/png', 'application/pdf', 'image/webp'],
+  smtp_enabled BOOLEAN DEFAULT FALSE,
+  sms_enabled BOOLEAN DEFAULT FALSE,
+  telegram_notifications_enabled BOOLEAN DEFAULT TRUE,
+  two_factor_enabled BOOLEAN DEFAULT FALSE,
+  maintenance_mode BOOLEAN DEFAULT FALSE,
+  maintenance_message TEXT,
+  telegram_channel_chat_id TEXT,
+  telegram_channel_url TEXT,
+  telegram_channel_name TEXT,
+  telegram_post_new_trip BOOLEAN DEFAULT TRUE,
+  telegram_post_weekly_summary BOOLEAN DEFAULT TRUE,
+  telegram_post_daily_countdown BOOLEAN DEFAULT TRUE,
+  telegram_recommendation_interval_hours INTEGER DEFAULT 24,
+  telegram_last_recommendation_post_at TIMESTAMP,
+  telegram_last_weekly_post_at TIMESTAMP,
+  telegram_last_daily_post_date DATE,
+  charity_channel_chat_id TEXT,
+  charity_channel_url TEXT,
+  charity_group_chat_id TEXT,
+  charity_group_url TEXT,
+  charity_auto_post_new_campaign BOOLEAN DEFAULT TRUE,
+  charity_auto_post_summary BOOLEAN DEFAULT TRUE,
+  charity_last_summary_post_at TIMESTAMP,
+  gnpl_enabled BOOLEAN DEFAULT FALSE,
+  gnpl_require_admin_approval BOOLEAN DEFAULT TRUE,
+  gnpl_default_term_days INTEGER DEFAULT 14,
+  gnpl_penalty_enabled BOOLEAN DEFAULT TRUE,
+  gnpl_penalty_percent NUMERIC(5,2) DEFAULT 5,
+  gnpl_penalty_period_days INTEGER DEFAULT 7,
+  gnpl_reminder_enabled BOOLEAN DEFAULT TRUE,
+  gnpl_reminder_days_before INTEGER DEFAULT 0,
+  receipt_intelligence_enabled BOOLEAN DEFAULT FALSE,
+  receipt_sample_collection_enabled BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+INSERT INTO app_settings (id, app_name, app_description)
+VALUES ('default', 'TicketHub', 'Telegram Ticket Reservation System')
+ON CONFLICT (id) DO NOTHING;
+
+CREATE INDEX idx_app_settings_updated_at ON app_settings(updated_at DESC);
+
+-- 13. Database Backups Log
 CREATE TABLE IF NOT EXISTS database_backups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   backup_id TEXT UNIQUE,
@@ -251,6 +305,7 @@ CREATE TRIGGER update_approvals_timestamp BEFORE UPDATE ON approvals FOR EACH RO
 CREATE TRIGGER update_invitations_timestamp BEFORE UPDATE ON invitations FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 CREATE TRIGGER update_telebirr_payments_timestamp BEFORE UPDATE ON telebirr_payments FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 CREATE TRIGGER update_telegram_channels_timestamp BEFORE UPDATE ON telegram_channels FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+CREATE TRIGGER update_app_settings_timestamp BEFORE UPDATE ON app_settings FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 
 -- Enable RLS for security
 ALTER TABLE telegram_users ENABLE ROW LEVEL SECURITY;
@@ -264,6 +319,7 @@ ALTER TABLE invitations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telegram_channels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telebirr_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE database_backups ENABLE ROW LEVEL SECURITY;
 
 -- Create simple RLS policies (open for now, tighten in production)
@@ -278,6 +334,7 @@ CREATE POLICY "allow_all_read" ON invitations FOR SELECT USING (true);
 CREATE POLICY "allow_all_read" ON notifications FOR SELECT USING (true);
 CREATE POLICY "allow_all_read" ON telegram_channels FOR SELECT USING (true);
 CREATE POLICY "allow_all_read" ON telebirr_payments FOR SELECT USING (true);
+CREATE POLICY "allow_all_read" ON app_settings FOR SELECT USING (true);
 CREATE POLICY "allow_all_read" ON database_backups FOR SELECT USING (true);
 
 -- Grant all permissions

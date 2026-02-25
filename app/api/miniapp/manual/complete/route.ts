@@ -12,7 +12,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const MAX_AGE_SECONDS = Number(process.env.TELEGRAM_MINIAPP_MAX_AGE_SEC || 60 * 60 * 24);
-const MAX_RECEIPT_BYTES = 2 * 1024 * 1024;
+const DEFAULT_MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
 const MIN_RECEIPT_BYTES = 1024;
 const ALLOWED_RECEIPT_MIME_TYPES = new Set([
   'image/jpeg',
@@ -97,6 +97,13 @@ function estimateBase64Bytes(base64Data: string) {
   return Math.max(0, Math.floor((cleaned.length * 3) / 4) - padding);
 }
 
+function resolveMaxReceiptBytes(maxFileSizeMbRaw: unknown) {
+  const numeric = Number(maxFileSizeMbRaw);
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_MAX_RECEIPT_BYTES;
+  const mb = Math.max(1, Math.min(50, Math.floor(numeric)));
+  return mb * 1024 * 1024;
+}
+
 async function persistReceiptIntelligenceSample(client: any, payload: Record<string, unknown>) {
   let workingPayload: Record<string, unknown> = { ...payload };
   for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -141,11 +148,12 @@ export async function POST(request: NextRequest) {
     const client = await getPrimaryClient();
     const { data: settingsRaw } = await client
       .from('app_settings')
-      .select('receipt_intelligence_enabled, receipt_sample_collection_enabled')
+      .select('receipt_intelligence_enabled, receipt_sample_collection_enabled, max_file_size')
       .eq('id', 'default')
       .maybeSingle();
     const receiptIntelligenceEnabled = Boolean((settingsRaw as any)?.receipt_intelligence_enabled);
     const receiptSampleCollectionEnabled = Boolean((settingsRaw as any)?.receipt_sample_collection_enabled);
+    const maxReceiptBytes = resolveMaxReceiptBytes((settingsRaw as any)?.max_file_size);
 
     const analysis = analyzeReceiptSubmission({
       receiptLink: receiptLinkInput,
@@ -196,8 +204,11 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      if (receiptBytes > MAX_RECEIPT_BYTES) {
-        return NextResponse.json({ ok: false, error: 'Receipt file is too large' }, { status: 413 });
+      if (receiptBytes > maxReceiptBytes) {
+        return NextResponse.json(
+          { ok: false, error: `Receipt file is too large. Max allowed is ${Math.floor(maxReceiptBytes / (1024 * 1024))}MB.` },
+          { status: 413 }
+        );
       }
     }
 

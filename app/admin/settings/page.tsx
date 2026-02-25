@@ -52,14 +52,31 @@ export default function SettingsPage() {
     const loadSettings = async () => {
       try {
         setLoadingSettings(true)
-        const response = await fetch('/api/admin/settings', { cache: 'no-store' })
+        const session = getAdminSession()
+        const response = await fetch('/api/admin/settings', {
+          cache: 'no-store',
+          headers: session?.admin?.id ? { 'x-admin-id': String(session.admin.id) } : undefined,
+        })
         const data = await response.json().catch(() => ({}))
-        if (!response.ok || !data?.ok) return
+        if (!response.ok || !data?.ok) {
+          setMessage({ type: 'error', text: String(data?.error || 'Failed to load settings') })
+          return
+        }
         if (!data?.settings) return
 
         setSettings((prev) => ({
           ...prev,
           ...data.settings,
+          app_name: String(data.settings.app_name || prev.app_name),
+          app_description: String(data.settings.app_description || prev.app_description),
+          app_color:
+            /^#[0-9a-f]{6}$/i.test(String(data.settings.app_color || ''))
+              ? String(data.settings.app_color)
+              : prev.app_color,
+          logo_url: data.settings.logo_url ? String(data.settings.logo_url) : null,
+          max_file_size: Number(data.settings.max_file_size || prev.max_file_size),
+          receipt_cache_ttl: Number(data.settings.receipt_cache_ttl || prev.receipt_cache_ttl),
+          maintenance_mode: Boolean(data.settings.maintenance_mode),
           telegram_channel_url: String(data.settings.telegram_channel_url || ''),
           telegram_channel_chat_id: String(data.settings.telegram_channel_chat_id || ''),
           telegram_channel_name: String(data.settings.telegram_channel_name || ''),
@@ -97,13 +114,23 @@ export default function SettingsPage() {
   const handleSave = async () => {
     setLoading(true)
     try {
+      const session = getAdminSession()
       const response = await fetch('/api/admin/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.admin?.id ? { 'x-admin-id': String(session.admin.id) } : {}),
+        },
         body: JSON.stringify(settings),
       })
 
-      if (!response.ok) throw new Error('Failed to save settings')
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || 'Failed to save settings')
+      }
+      if (data?.settings) {
+        setSettings((prev) => ({ ...prev, ...data.settings }))
+      }
       setMessage({ type: 'success', text: 'Settings saved successfully' })
     } catch (error) {
       setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to save' })
@@ -206,11 +233,13 @@ export default function SettingsPage() {
 
     setLoading(true)
     try {
+      const session = getAdminSession()
       const formData = new FormData()
       formData.append('file', file)
 
       const response = await fetch('/api/admin/settings/upload-logo', {
         method: 'POST',
+        headers: session?.admin?.id ? { 'x-admin-id': String(session.admin.id) } : undefined,
         body: formData,
       })
 
