@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { getAdminSession } from '@/lib/admin-auth';
-import { hasAdminPermission, normalizeAdminRole } from '@/lib/admin-rbac';
+import { hasAdminPermission, normalizeAdminRole } from '@/lib/admin-rbac-client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Check, X, Eye, Download, Search } from 'lucide-react';

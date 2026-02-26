@@ -1,7 +1,7 @@
 'use client';
 
 import { Card } from '@/components/ui/card';
-import { ADMIN_PERMISSIONS, ADMIN_ROLES, getAdminPermissionsForRole } from '@/lib/admin-rbac';
+import { ADMIN_PERMISSIONS, ADMIN_ROLES, getAdminPermissionsForRole } from '@/lib/admin-rbac-client';
 
 function formatLabel(value: string) {
   return value.replace(/_/g, ' ');
@@ -59,4 +59,3 @@ export default function AdminRbacPage() {
     </div>
   );
 }
-

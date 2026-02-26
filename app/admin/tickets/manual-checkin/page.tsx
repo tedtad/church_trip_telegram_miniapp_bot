@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Search } from 'lucide-react';
 import { getAdminSession } from '@/lib/admin-auth';
-import { hasAdminPermission, normalizeAdminRole } from '@/lib/admin-rbac';
+import { hasAdminPermission, normalizeAdminRole } from '@/lib/admin-rbac-client';
 
 interface CheckInCandidate {
   ticketId: string;
@@ -221,4 +221,3 @@ export default function ManualCheckInPage() {
     </div>
   );
 }
-

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { getAdminSession, adminLogout, refreshAdminSession } from '@/lib/admin-auth';
-import { AdminPermission, hasAdminPermission, normalizeAdminRole } from '@/lib/admin-rbac';
+import { AdminPermission, hasAdminPermission, normalizeAdminRole } from '@/lib/admin-rbac-client';
 import { Button } from '@/components/ui/button';
 import { LayoutDashboard, Users, Ticket, MapPin, LogOut, Menu, X, BarChart3, Database, Link as LinkIcon, Zap, Bot, QrCode, Tag, Settings, Heart, Wallet, Shield } from 'lucide-react';
 
