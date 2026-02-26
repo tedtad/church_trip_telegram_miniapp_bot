@@ -12,6 +12,18 @@ interface CustomerWithStats extends TelegramUser {
   total_spent?: number;
 }
 
+type CustomerTicketStat = {
+  ticket_status?: string | null;
+  purchase_price?: number | null;
+};
+
+const SOLD_TICKET_STATUSES = new Set(['confirmed', 'used']);
+
+function isSoldTicketStatus(value: string | null | undefined) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return SOLD_TICKET_STATUSES.has(normalized);
+}
+
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<CustomerWithStats[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,8 +43,7 @@ export default function CustomersPage() {
         .from('telegram_users')
         .select(`
           *,
-          tickets: tickets (count),
-          receipts: receipts (amount_paid)
+          tickets: tickets (ticket_status, purchase_price)
         `)
         .order('created_at', { ascending: false });
 
@@ -43,8 +54,15 @@ export default function CustomersPage() {
 
       const customersWithStats = data?.map((customer) => ({
         ...customer,
-        total_tickets: customer.tickets?.[0]?.count || 0,
-        total_spent: customer.receipts?.reduce((sum: number, r: any) => sum + (r.amount_paid || 0), 0) || 0,
+        total_tickets:
+          (customer.tickets as CustomerTicketStat[] | null | undefined)?.filter((ticket) =>
+            isSoldTicketStatus(ticket.ticket_status)
+          ).length || 0,
+        total_spent:
+          (customer.tickets as CustomerTicketStat[] | null | undefined)?.reduce((sum: number, ticket) => {
+            if (!isSoldTicketStatus(ticket.ticket_status)) return sum;
+            return sum + Number(ticket.purchase_price || 0);
+          }, 0) || 0,
       })) || [];
 
       setCustomers(customersWithStats);
@@ -183,7 +201,7 @@ export default function CustomersPage() {
                       {customer.total_tickets}
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-300">
-                      {customer.total_spent} ETB
+                      {Number(customer.total_spent || 0).toFixed(2)} ETB
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-300">
                       {new Date(customer.created_at).toLocaleDateString()}
