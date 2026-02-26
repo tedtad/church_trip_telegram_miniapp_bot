@@ -43,19 +43,40 @@ export function verifyOnboardingOtp(token: string, otp: string, hash: string) {
   return timingSafeEqual(calculated, stored);
 }
 
-export function getBotStartLink(token: string) {
-  const botUsername = String(process.env.TELEGRAM_BOT_USERNAME || '').trim().replace(/^@/, '');
+async function resolveBotUsername() {
+  const fromEnv = String(process.env.TELEGRAM_BOT_USERNAME || '').trim().replace(/^@/, '');
+  if (fromEnv) return fromEnv;
+
+  const botToken = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  if (!botToken) return '';
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, {
+      cache: 'no-store',
+    });
+    if (!response.ok) return '';
+    const payload = await response.json().catch(() => ({}));
+    const username = String(payload?.result?.username || '').trim().replace(/^@/, '');
+    return username;
+  } catch {
+    return '';
+  }
+}
+
+export async function getBotStartLink(token: string) {
+  const botUsername = await resolveBotUsername();
   if (!botUsername) return '';
   return `https://t.me/${botUsername}?start=onboard_${token}`;
 }
 
-export function buildOnboardingTelegramMessage(input: {
+export async function buildOnboardingTelegramMessage(input: {
   name: string;
   token: string;
   otp: string;
   expiresInMinutes: number;
 }) {
-  const botStartLink = getBotStartLink(input.token);
+  const botUsername = await resolveBotUsername();
+  const botStartLink = botUsername ? `https://t.me/${botUsername}?start=onboard_${input.token}` : '';
   const safeName = String(input.name || 'Admin User').trim() || 'Admin User';
 
   const lines = [
@@ -66,7 +87,8 @@ export function buildOnboardingTelegramMessage(input: {
     '',
     botStartLink
       ? `1) Open: ${botStartLink}`
-      : `1) Open @${String(process.env.TELEGRAM_BOT_USERNAME || 'your_bot').replace(/^@/, '')} and send: /start onboard_${input.token}`,
+      : '1) Bot username is not configured. Set TELEGRAM_BOT_USERNAME, then regenerate onboarding.',
+    botUsername ? `Or send in private chat: /start onboard_${input.token}` : '',
     '2) In chat, send: /activate <otp> <username> <new_password>',
     'Example: /activate 123456 teddy_admin StrongPass!234',
     '',

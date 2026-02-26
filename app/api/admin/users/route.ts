@@ -322,7 +322,7 @@ async function createOnboardingChallenge(supabase: any, input: {
     throw insert.error;
   }
 
-  const messagePayload = buildOnboardingTelegramMessage({
+  const messagePayload = await buildOnboardingTelegramMessage({
     name: input.name,
     token,
     otp,

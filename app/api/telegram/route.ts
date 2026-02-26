@@ -305,8 +305,8 @@ function parseActivateCommand(text: string | undefined) {
 
 function validateActivationInput(input: { otp: string; username: string; newPassword: string }) {
   if (!/^\d{6}$/.test(input.otp)) return 'OTP must be 6 digits.';
-  if (!/^[a-zA-Z0-9_]{3,32}$/.test(input.username)) {
-    return 'Username must be 3-32 chars (letters, numbers, underscore).';
+  if (!/^[^\s]{3,64}$/.test(input.username)) {
+    return 'Username must be 3-64 non-space characters.';
   }
   if (input.newPassword.length < 10) return 'Password must be at least 10 characters.';
   if (!/[A-Z]/.test(input.newPassword)) return 'Password must include an uppercase letter.';
