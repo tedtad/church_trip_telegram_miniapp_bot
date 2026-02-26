@@ -12,12 +12,33 @@ function detectMissingColumn(error: unknown): string | null {
 
   const doubleQuoted = message.match(/"([a-zA-Z0-9_.]+)"/);
   if (doubleQuoted?.[1]) return doubleQuoted[1].split('.').pop() || null;
+  const rawPattern = message.match(/column\s+([a-zA-Z0-9_.]+)\s+does not exist/i);
+  if (rawPattern?.[1]) return rawPattern[1].split('.').pop() || null;
   return null;
 }
 
 function isRelationshipLookupError(error: unknown) {
   const message = String((error as any)?.message || '').toLowerCase();
-  return message.includes('relationship') || message.includes('foreign key');
+  const code = String((error as any)?.code || '').toUpperCase();
+  return (
+    code.startsWith('PGRST2') ||
+    message.includes('relationship') ||
+    message.includes('foreign key') ||
+    message.includes('schema cache')
+  );
+}
+
+function isMissingRelation(error: unknown, relationName?: string) {
+  const message = String((error as any)?.message || '').toLowerCase();
+  const code = String((error as any)?.code || '').toUpperCase();
+  const genericMissing =
+    code === '42P01' ||
+    message.includes('does not exist') ||
+    message.includes('could not find table') ||
+    message.includes('schema cache');
+  if (!genericMissing) return false;
+  if (!relationName) return true;
+  return message.includes(relationName.toLowerCase());
 }
 
 async function loadInvitationsWithFallback(supabase: any, statusFilter: string) {
@@ -33,31 +54,40 @@ async function loadInvitationsWithFallback(supabase: any, statusFilter: string) 
     '*',
   ];
 
+  let lastError: unknown = null;
+  let allowStatusFilter = true;
+
   for (const selectClause of selectCandidates) {
     let query = supabase.from('invitations').select(selectClause).order('created_at', { ascending: false }).limit(300);
-    if (statusFilter === 'active') {
+    if (allowStatusFilter && statusFilter === 'active') {
       query = query.eq('is_active', true);
-    } else if (statusFilter === 'inactive') {
+    } else if (allowStatusFilter && statusFilter === 'inactive') {
       query = query.eq('is_active', false);
     }
 
     const { data, error } = await query;
     if (!error) return data || [];
+    lastError = error;
 
     const missing = detectMissingColumn(error);
-    if (!missing && !isRelationshipLookupError(error)) break;
+    if (missing === 'is_active') {
+      allowStatusFilter = false;
+    }
+
+    if (
+      missing ||
+      isRelationshipLookupError(error) ||
+      isMissingRelation(error) ||
+      String((error as any)?.code || '').toUpperCase() === '42703'
+    ) {
+      continue;
+    }
+
+    break;
   }
 
+  if (lastError) throw lastError;
   throw new Error('Failed to fetch invitations');
-}
-
-function isMissingRelation(error: unknown, relationName: string) {
-  const message = String((error as any)?.message || '').toLowerCase();
-  return (
-    message.includes('relation') &&
-    message.includes(relationName.toLowerCase()) &&
-    message.includes('does not exist')
-  );
 }
 
 async function loadInvitationTargetCounts(supabase: any, invitationIds: string[]) {
@@ -99,10 +129,16 @@ export async function GET(request: NextRequest) {
       .trim()
       .toLowerCase();
     const invitations = await loadInvitationsWithFallback(supabase, statusFilter);
-    const targetCounts = await loadInvitationTargetCounts(
-      supabase,
-      (invitations || []).map((inv: any) => String(inv?.id || ''))
-    );
+    let targetCounts: Record<string, number> = {};
+    try {
+      targetCounts = await loadInvitationTargetCounts(
+        supabase,
+        (invitations || []).map((inv: any) => String(inv?.id || ''))
+      );
+    } catch (targetError) {
+      console.warn('[admin-invitations] target count fallback:', targetError);
+      targetCounts = {};
+    }
     const hydratedInvitations = (invitations || []).map((inv: any) => {
       const invitationId = String(inv?.id || '');
       const targetUserCount = targetCounts[invitationId] || 0;
@@ -121,8 +157,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('[admin-invitations] GET error:', error);
+    const detailed = String((error as any)?.message || '').trim();
     return NextResponse.json(
-      { ok: false, success: false, error: 'Failed to fetch invitations' },
+      { ok: false, success: false, error: detailed || 'Failed to fetch invitations' },
       { status: 500 }
     );
   }
