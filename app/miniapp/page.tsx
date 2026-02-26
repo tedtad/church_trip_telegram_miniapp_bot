@@ -15,6 +15,7 @@ type MiniAppUser = {
 
 type MiniAppSettings = {
   appName?: string;
+  appColor?: string;
   logoUrl?: string;
   logoFilename?: string;
   maintenanceMode?: boolean;
@@ -139,6 +140,20 @@ const MAX_RECEIPT_BYTES = 2 * 1024 * 1024;
 const ALLOWED_RECEIPT_MIME_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'application/pdf']);
 const ALLOWED_RECEIPT_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.pdf']);
 const MINIAPP_TRIP_DESCRIPTION_PREVIEW_LIMIT = 250;
+const ALLOWED_TRIP_DESCRIPTION_TAGS = new Set([
+  'h1',
+  'h2',
+  'h3',
+  'p',
+  'br',
+  'strong',
+  'em',
+  'u',
+  'ul',
+  'ol',
+  'li',
+  'a',
+]);
 const I18N = miniAppI18n as Record<UiLang, Record<string, string>>;
 const AMHARIC_FONT_STACK = "'Noto Sans Ethiopic','Abyssinica SIL','Nyala','Segoe UI',sans-serif";
 
@@ -171,6 +186,74 @@ function stripHtmlToText(value: string) {
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function sanitizeTripDescriptionHtml(value: string) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  if (typeof window === 'undefined') {
+    return stripHtmlToText(raw);
+  }
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${raw}</div>`, 'text/html');
+    const root = doc.body.firstElementChild as HTMLElement | null;
+    if (!root) return stripHtmlToText(raw);
+
+    const sanitizeNode = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) return;
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        node.parentNode?.removeChild(node);
+        return;
+      }
+
+      const element = node as HTMLElement;
+      const tagName = element.tagName.toLowerCase();
+
+      if (!ALLOWED_TRIP_DESCRIPTION_TAGS.has(tagName)) {
+        const parent = element.parentNode;
+        if (!parent) {
+          element.replaceWith(doc.createTextNode(element.textContent || ''));
+          return;
+        }
+        while (element.firstChild) {
+          parent.insertBefore(element.firstChild, element);
+        }
+        parent.removeChild(element);
+        return;
+      }
+
+      for (const attr of Array.from(element.attributes)) {
+        const attrName = attr.name.toLowerCase();
+        if (tagName === 'a' && attrName === 'href') continue;
+        element.removeAttribute(attr.name);
+      }
+
+      if (tagName === 'a') {
+        const href = String(element.getAttribute('href') || '').trim();
+        if (!/^https?:\/\//i.test(href)) {
+          element.removeAttribute('href');
+        } else {
+          element.setAttribute('target', '_blank');
+          element.setAttribute('rel', 'noopener noreferrer');
+        }
+      }
+
+      for (const child of Array.from(element.childNodes)) {
+        sanitizeNode(child);
+      }
+    };
+
+    for (const child of Array.from(root.childNodes)) {
+      sanitizeNode(child);
+    }
+
+    return String(root.innerHTML || '').trim();
+  } catch {
+    return stripHtmlToText(raw);
+  }
 }
 
 function splitNameParts(fullName: string) {
@@ -237,6 +320,42 @@ function validateGnplIdCardFile(file: File): ReceiptValidationErrorKey | null {
   return 'id_card_validation_type';
 }
 
+function normalizeHexColor(value: string) {
+  const color = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : '#06b6d4';
+}
+
+function hexToRgb(hexColor: string) {
+  const color = normalizeHexColor(hexColor).slice(1);
+  return {
+    r: Number.parseInt(color.slice(0, 2), 16),
+    g: Number.parseInt(color.slice(2, 4), 16),
+    b: Number.parseInt(color.slice(4, 6), 16),
+  };
+}
+
+function rgbToHex(r: number, g: number, b: number) {
+  const toHex = (value: number) => Math.min(255, Math.max(0, Math.round(value))).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function mixHex(baseHex: string, targetHex: string, ratio: number) {
+  const base = hexToRgb(baseHex);
+  const target = hexToRgb(targetHex);
+  const weight = Math.min(1, Math.max(0, ratio));
+  return rgbToHex(
+    base.r + (target.r - base.r) * weight,
+    base.g + (target.g - base.g) * weight,
+    base.b + (target.b - base.b) * weight
+  );
+}
+
+function getContrastTextColor(hexColor: string) {
+  const { r, g, b } = hexToRgb(hexColor);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.62 ? '#0f172a' : '#ffffff';
+}
+
 export default function MiniAppPage() {
   const [initData, setInitData] = useState('');
   const [user, setUser] = useState<MiniAppUser | null>(null);
@@ -258,9 +377,13 @@ export default function MiniAppPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
   const [maintenanceMessage, setMaintenanceMessage] = useState('');
   const [showExpiredBookings, setShowExpiredBookings] = useState(false);
+  const [basicInfoCollapsed, setBasicInfoCollapsed] = useState(false);
+  const [tripsSectionCollapsed, setTripsSectionCollapsed] = useState(false);
+  const [bookingsSectionCollapsed, setBookingsSectionCollapsed] = useState(false);
   const [methodByTrip, setMethodByTrip] = useState<Record<string, PaymentMethod>>({});
   const [quantityByTrip, setQuantityByTrip] = useState<Record<string, number>>({});
   const [expandedTripDescriptions, setExpandedTripDescriptions] = useState<Record<string, boolean>>({});
+  const [expandedBookingIds, setExpandedBookingIds] = useState<Record<string, boolean>>({});
   const [discountCodeByTrip, setDiscountCodeByTrip] = useState<Record<string, string>>({});
   const [pendingInviteCode, setPendingInviteCode] = useState('');
   const [pendingInviteTripId, setPendingInviteTripId] = useState('');
@@ -280,9 +403,14 @@ export default function MiniAppPage() {
     () => String(miniAppSettings?.appName || '').trim() || t('app_title'),
     [miniAppSettings?.appName, t]
   );
+  const brandColor = useMemo(() => normalizeHexColor(String(miniAppSettings?.appColor || '')), [miniAppSettings?.appColor]);
+  const brandColorStrong = useMemo(() => mixHex(brandColor, '#0b1220', 0.2), [brandColor]);
+  const brandColorSoft = useMemo(() => mixHex(brandColor, '#ffffff', 0.7), [brandColor]);
+  const brandColorMuted = useMemo(() => mixHex(brandColor, '#0f172a', 0.65), [brandColor]);
+  const brandTextColor = useMemo(() => getContrastTextColor(brandColor), [brandColor]);
   const logoImageUrl = useMemo(() => String(miniAppSettings?.logoUrl || '').trim(), [miniAppSettings?.logoUrl]);
   const logoLabel = useMemo(
-    () => String(miniAppSettings?.logoFilename || '').trim() || 'Logo placeholder',
+    () => String(miniAppSettings?.logoFilename || '').trim() || '',
     [miniAppSettings?.logoFilename]
   );
   const appInitial = useMemo(() => {
@@ -295,6 +423,24 @@ export default function MiniAppPage() {
   }, [initData]);
   const charityEnabled = miniAppSettings?.charityEnabled !== false;
   const discountEnabled = miniAppSettings?.discountEnabled !== false;
+  const tripsCount = trips.length;
+  const bookingsCount = bookings.length;
+  const activeBookingsCount = useMemo(
+    () => bookings.filter((booking) => !isExpiredByDeparture(booking.departureDate)).length,
+    [bookings]
+  );
+  const mainStyle = useMemo(
+    () =>
+      ({
+        ...(uiLang === 'am' ? { fontFamily: AMHARIC_FONT_STACK } : {}),
+        '--brand-color': brandColor,
+        '--brand-color-strong': brandColorStrong,
+        '--brand-color-soft': brandColorSoft,
+        '--brand-color-muted': brandColorMuted,
+        '--brand-color-text': brandTextColor,
+      }) as React.CSSProperties,
+    [brandColor, brandColorMuted, brandColorSoft, brandColorStrong, brandTextColor, uiLang]
+  );
   const hasFieldError = useCallback((key: string) => Boolean(fieldErrors[key]), [fieldErrors]);
 
   const clearFieldError = useCallback((key: string) => {
@@ -364,6 +510,7 @@ export default function MiniAppPage() {
           const sessionSettings = (sessionJson?.appSettings || {}) as MiniAppSettings;
           setMiniAppSettings({
             appName: String(sessionSettings?.appName || '').trim(),
+            appColor: normalizeHexColor(String(sessionSettings?.appColor || '')),
             logoUrl: String(sessionSettings?.logoUrl || '').trim(),
             logoFilename: String(sessionSettings?.logoFilename || '').trim(),
             maintenanceMode: true,
@@ -400,6 +547,7 @@ export default function MiniAppPage() {
       setUiLang(sessionUser?.languageCode === 'en' ? 'en' : 'am');
       setMiniAppSettings({
         appName: String(sessionSettings?.appName || '').trim(),
+        appColor: normalizeHexColor(String(sessionSettings?.appColor || '')),
         logoUrl: String(sessionSettings?.logoUrl || '').trim(),
         logoFilename: String(sessionSettings?.logoFilename || '').trim(),
         maintenanceMode: Boolean(sessionSettings?.maintenanceMode),
@@ -1116,7 +1264,7 @@ export default function MiniAppPage() {
     return (
       <main
         className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2937,#020617)] text-slate-100 px-4 py-5"
-        style={uiLang === 'am' ? { fontFamily: AMHARIC_FONT_STACK } : undefined}
+        style={mainStyle}
       >
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
         <section className="max-w-xl mx-auto rounded-2xl border border-amber-500/40 bg-slate-900/80 p-6 text-center space-y-3">
@@ -1132,7 +1280,7 @@ export default function MiniAppPage() {
   return (
     <main
       className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2937,#020617)] text-slate-100 px-4 py-5"
-      style={uiLang === 'am' ? { fontFamily: AMHARIC_FONT_STACK } : undefined}
+      style={mainStyle}
     >
       <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
       <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex flex-col items-center gap-2 px-4">
@@ -1149,13 +1297,13 @@ export default function MiniAppPage() {
       </div>
 
       <section className="max-w-3xl mx-auto space-y-4">
-        <header className="rounded-2xl border border-cyan-700/40 bg-slate-900/70 p-4 shadow-xl">
+        <header className="rounded-2xl border border-[color:var(--brand-color-soft)] bg-slate-900/70 p-4 shadow-xl">
           <div className="mb-2 flex items-center gap-3 rounded-xl border border-slate-700/70 bg-slate-950/40 p-2">
             <div className="h-11 w-11 overflow-hidden rounded-lg border border-slate-700/80 bg-slate-900/80">
               {logoImageUrl ? (
                 <img src={logoImageUrl} alt={logoLabel} className="h-full w-full object-cover" />
               ) : (
-                <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-cyan-300">
+                <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-[var(--brand-color)]">
                   {appInitial}
                 </div>
               )}
@@ -1165,7 +1313,7 @@ export default function MiniAppPage() {
               <p className="truncate text-xs text-slate-400">{logoLabel}</p>
             </div>
           </div>
-          <p className="text-xs tracking-[0.18em] uppercase text-cyan-300">🎫 {displayAppName}</p>
+          
           <h1 className="text-2xl font-semibold mt-1">✈️ {t('page_title')}</h1>
           {charityEnabled ? (
             <div className="mt-3">
@@ -1177,9 +1325,19 @@ export default function MiniAppPage() {
               </a>
             </div>
           ) : null}
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-slate-300">👤 {username || t('telegram_customer')}</p>
-            <div className="flex flex-col gap-2 sm:items-end">
+          <div className="mt-2 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-slate-300">👤 {username || t('telegram_customer')}</p>
+              <button
+                type="button"
+                onClick={() => setBasicInfoCollapsed((prev) => !prev)}
+                className="rounded-md border border-[color:var(--brand-color-soft)] bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+              >
+                {basicInfoCollapsed ? 'Expand basic info' : 'Collapse basic info'}
+              </button>
+            </div>
+            {!basicInfoCollapsed ? (
+              <div className="flex flex-col gap-2 sm:items-end">
               <label className="inline-flex items-center gap-2 text-xs text-slate-300">
                 <span>🌐 {t('language')}</span>
                 <select
@@ -1242,7 +1400,7 @@ export default function MiniAppPage() {
                 />
               </div>
               {gnplIdCardFileName ? (
-                <p className="text-[11px] text-cyan-300 w-full text-left sm:text-right">
+                <p className="text-[11px] text-[var(--brand-color)] w-full text-left sm:text-right">
                   {t('id_card_selected')}: {gnplIdCardFileName}
                 </p>
               ) : null}
@@ -1256,12 +1414,13 @@ export default function MiniAppPage() {
                   type="button"
                   onClick={saveProfile}
                   disabled={profileSaving}
-                  className="rounded-md border border-cyan-700/50 bg-cyan-900/30 px-3 py-1 text-xs text-cyan-100 hover:bg-cyan-900/40 disabled:opacity-60"
+                  className="rounded-md border border-[color:var(--brand-color-soft)] bg-[color:var(--brand-color-muted)] px-3 py-1 text-xs text-white hover:opacity-90 disabled:opacity-60"
                 >
                   {profileSaving ? 'Saving profile...' : 'Save profile'}
                 </button>
               </div>
-            </div>
+              </div>
+            ) : null}
           </div>
           {miniAppSettings?.telegramChannelUrl ? (
             <div className="mt-3 pt-3 border-t border-slate-700/60 flex items-center justify-between gap-2">
@@ -1272,7 +1431,7 @@ export default function MiniAppPage() {
                 href={miniAppSettings.telegramChannelUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-md border border-cyan-700/50 bg-cyan-900/30 px-3 py-1 text-xs text-cyan-100 hover:bg-cyan-900/40"
+                className="rounded-md border border-[color:var(--brand-color-soft)] bg-[color:var(--brand-color-muted)] px-3 py-1 text-xs text-white hover:opacity-90"
               >
                 {t('join_channel')}
               </a>
@@ -1280,21 +1439,45 @@ export default function MiniAppPage() {
           ) : null}
         </header>
 
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 px-3 py-2">
+            <p className="text-[11px] text-slate-400">Trips</p>
+            <p className="text-lg font-semibold text-[var(--brand-color)]">{tripsCount}</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 px-3 py-2">
+            <p className="text-[11px] text-slate-400">Bookings</p>
+            <p className="text-lg font-semibold text-slate-100">{bookingsCount}</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 px-3 py-2">
+            <p className="text-[11px] text-slate-400">Active</p>
+            <p className="text-lg font-semibold text-emerald-300">{activeBookingsCount}</p>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-medium">🚌 {t('available_trips')}</h2>
-          <button
-            type="button"
-            onClick={loadData}
-            className="rounded-lg border border-cyan-700/40 px-3 py-1 text-sm hover:bg-cyan-900/30"
-          >
-            🔄 {t('refresh')}
-          </button>
+          <h2 className="text-lg font-medium">?? {t('available_trips')}</h2>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTripsSectionCollapsed((prev) => !prev)}
+              className="rounded-lg border border-slate-700 px-3 py-1 text-xs hover:bg-slate-800"
+            >
+              {tripsSectionCollapsed ? 'Expand' : 'Collapse'}
+            </button>
+            <button
+              type="button"
+              onClick={loadData}
+              className="rounded-lg border border-[color:var(--brand-color-soft)] px-3 py-1 text-sm text-[var(--brand-color)] hover:bg-[color:var(--brand-color-muted)] hover:text-white"
+            >
+              ?? {t('refresh')}
+            </button>
+          </div>
         </div>
         <p className="text-xs text-slate-400">
           {t('initial_step_required')}
         </p>
 
-        {loading ? (
+        {tripsSectionCollapsed ? null : loading ? (
           <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-4 text-sm">
             {t('loading')}
           </div>
@@ -1311,13 +1494,14 @@ export default function MiniAppPage() {
               const method = selectedMethod(trip);
               const quantity = selectedQuantity(trip.id);
               const isBusy = busyTripId === trip.id;
-              const description = stripHtmlToText(trip.description || '');
-              const isDescriptionLong = description.length > MINIAPP_TRIP_DESCRIPTION_PREVIEW_LIMIT;
+              const sanitizedDescriptionHtml = sanitizeTripDescriptionHtml(trip.description || '');
+              const descriptionText = stripHtmlToText(sanitizedDescriptionHtml || trip.description || '');
+              const isDescriptionLong = descriptionText.length > MINIAPP_TRIP_DESCRIPTION_PREVIEW_LIMIT;
               const isDescriptionExpanded = Boolean(expandedTripDescriptions[trip.id]);
               const visibleDescription =
                 isDescriptionLong && !isDescriptionExpanded
-                  ? `${description.slice(0, MINIAPP_TRIP_DESCRIPTION_PREVIEW_LIMIT).trimEnd()}...`
-                  : description;
+                  ? `${descriptionText.slice(0, MINIAPP_TRIP_DESCRIPTION_PREVIEW_LIMIT).trimEnd()}...`
+                  : descriptionText;
               return (
                 <article key={trip.id} className="rounded-2xl border border-slate-700/70 bg-slate-900/65 overflow-hidden">
                   {image ? <img src={image} alt={trip.name || t('trip_fallback')} className="h-36 w-full object-cover" /> : null}
@@ -1335,9 +1519,16 @@ export default function MiniAppPage() {
                       💰 ETB {Number(trip.price_per_ticket || 0).toFixed(2)} | 💺 {t('seats')} {trip.available_seats ?? 0}/
                       {trip.total_seats ?? 0}
                     </p>
-                    {description ? (
+                    {descriptionText ? (
                       <div className="space-y-1">
-                        <p className="text-xs text-slate-300 leading-relaxed">{visibleDescription}</p>
+                        {isDescriptionExpanded ? (
+                          <div
+                            className="text-xs text-slate-300 leading-relaxed space-y-1 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-medium [&_p]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_a]:text-[var(--brand-color)] [&_a]:underline"
+                            dangerouslySetInnerHTML={{ __html: sanitizedDescriptionHtml || visibleDescription }}
+                          />
+                        ) : (
+                          <p className="text-xs text-slate-300 leading-relaxed">{visibleDescription}</p>
+                        )}
                         {isDescriptionLong ? (
                           <button
                             type="button"
@@ -1347,7 +1538,7 @@ export default function MiniAppPage() {
                                 [trip.id]: !prev[trip.id],
                               }))
                             }
-                            className="text-[11px] text-cyan-300 hover:text-cyan-200 underline"
+                            className="text-[11px] text-[var(--brand-color)] hover:opacity-80 underline"
                           >
                             {isDescriptionExpanded ? 'Less' : 'More'}
                           </button>
@@ -1360,7 +1551,7 @@ export default function MiniAppPage() {
                           href={String(trip.telegram_group_url)}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-xs text-cyan-300 underline"
+                          className="text-xs text-[var(--brand-color)] underline"
                         >
                           {t('join_trip_group')}
                         </a>
@@ -1418,7 +1609,7 @@ export default function MiniAppPage() {
                         type="button"
                         disabled={isBusy}
                         onClick={() => startBooking(trip)}
-                        className="rounded-lg bg-cyan-500 text-slate-950 px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                        className="rounded-lg bg-[var(--brand-color)] text-[var(--brand-color-text)] px-4 py-2 text-sm font-semibold hover:bg-[var(--brand-color-strong)] disabled:opacity-60"
                       >
                         {isBusy ? t('starting') : t('book')}
                       </button>
@@ -1431,7 +1622,7 @@ export default function MiniAppPage() {
         )}
 
         {manualFlow ? (
-          <section className="rounded-2xl border border-cyan-700/50 bg-slate-900/70 p-4 space-y-3">
+          <section className="rounded-2xl border border-[color:var(--brand-color-soft)] bg-slate-900/70 p-4 space-y-3">
             <h2 className="text-lg font-semibold">
               💳 {t('manual_payment')} - {manualFlow.tripName}
             </h2>
@@ -1487,7 +1678,7 @@ export default function MiniAppPage() {
                       <button
                         type="button"
                         onClick={() => copyText(selectedBank.account_name)}
-                        className="text-xs text-cyan-300 underline"
+                        className="text-xs text-[var(--brand-color)] underline"
                       >
                         {t('copy')}
                       </button>
@@ -1497,7 +1688,7 @@ export default function MiniAppPage() {
                       <button
                         type="button"
                         onClick={() => copyText(selectedBank.account_number)}
-                        className="text-xs text-cyan-300 underline"
+                        className="text-xs text-[var(--brand-color)] underline"
                       >
                         {t('copy')}
                       </button>
@@ -1518,7 +1709,7 @@ export default function MiniAppPage() {
                     <button
                       type="button"
                       onClick={() => copyText(manualFlow.telebirrManualAccountName)}
-                      className="text-xs text-cyan-300 underline"
+                      className="text-xs text-[var(--brand-color)] underline"
                     >
                       {t('copy')}
                     </button>
@@ -1530,7 +1721,7 @@ export default function MiniAppPage() {
                     <button
                       type="button"
                       onClick={() => copyText(manualFlow.telebirrManualAccountNumber)}
-                      className="text-xs text-cyan-300 underline"
+                      className="text-xs text-[var(--brand-color)] underline"
                     >
                       {t('copy')}
                     </button>
@@ -1659,7 +1850,7 @@ export default function MiniAppPage() {
                 type="button"
                 onClick={submitManualPayment}
                 disabled={manualSubmitting}
-                className="rounded-lg bg-emerald-500 text-slate-950 px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                className="rounded-lg bg-[var(--brand-color)] text-[var(--brand-color-text)] px-4 py-2 text-sm font-semibold hover:bg-[var(--brand-color-strong)] disabled:opacity-60"
               >
                 {manualSubmitting ? t('submitting') : t('complete_manual_payment')}
               </button>
@@ -1760,15 +1951,24 @@ export default function MiniAppPage() {
         <div className="pt-2">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-lg font-medium">📋 {t('my_bookings')}</h2>
-            <button
-              type="button"
-              onClick={() => setShowExpiredBookings((prev) => !prev)}
-              className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
-            >
-              {showExpiredBookings ? `👁️ ${t('hide_expired_tickets')}` : `🔍 ${t('show_expired_tickets')}`}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setBookingsSectionCollapsed((prev) => !prev)}
+                className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+              >
+                {bookingsSectionCollapsed ? 'Expand' : 'Collapse'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowExpiredBookings((prev) => !prev)}
+                className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+              >
+                {showExpiredBookings ? `??? ${t('hide_expired_tickets')}` : `?? ${t('show_expired_tickets')}`}
+              </button>
+            </div>
           </div>
-          <div className="grid gap-2">
+          <div className={`grid gap-2 ${bookingsSectionCollapsed ? 'hidden' : ''}`}>
             {visibleBookings.length === 0 ? (
               <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-4 text-sm">
                 {t('no_bookings')}
@@ -1780,77 +1980,97 @@ export default function MiniAppPage() {
               const normalizedStatus = String(booking.status || '').toLowerCase();
               const canTransfer =
                 normalizedStatus === 'confirmed' && !isExpiredByDeparture(booking.departureDate);
+              const isBookingExpanded = Boolean(expandedBookingIds[booking.id]);
 
               return (
                 <div key={booking.id} className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-3">
-                  <p className="font-medium">Trip: {booking.tripName}</p>
-                  <p className="text-sm text-slate-300">
-                    Destination: {booking.destination} | Ticket: {booking.serialNumber}
-                  </p>
-                  <p className="text-xs text-slate-400">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium">Trip: {booking.tripName}</p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedBookingIds((prev) => ({
+                          ...prev,
+                          [booking.id]: !prev[booking.id],
+                        }))
+                      }
+                      className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                    >
+                      {isBookingExpanded ? 'Collapse' : 'Expand'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
                     {t('status')}: {booking.status} | {t('ref_short')}: {booking.referenceNumber || t('na')}
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {booking.cardUrl ? (
-                      <a className="text-xs text-cyan-300 underline" href={booking.cardUrl} target="_blank" rel="noreferrer">
-                        {t('open_digital_ticket')}
-                      </a>
-                    ) : null}
-                    {booking.cardUrl ? (
-                      <button
-                        type="button"
-                        onClick={() => shareBookingTicket(booking)}
-                        className="text-xs text-emerald-300 underline"
-                      >
-                        Share Ticket
-                      </button>
-                    ) : null}
-                  </div>
 
-                  {canTransfer ? (
-                    <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/50 p-2 space-y-2">
-                      <p className="text-xs text-slate-300">Transfer this ticket to another phone</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          value={transferInput.phone}
-                          onChange={(e) =>
-                            setTransferInputs((prev) => ({
-                              ...prev,
-                              [booking.id]: {
-                                ...transferInput,
-                                phone: e.target.value,
-                              },
-                            }))
-                          }
-                          placeholder="Recipient phone"
-                          className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs"
-                        />
-                        <input
-                          type="text"
-                          value={transferInput.name}
-                          onChange={(e) =>
-                            setTransferInputs((prev) => ({
-                              ...prev,
-                              [booking.id]: {
-                                ...transferInput,
-                                name: e.target.value,
-                              },
-                            }))
-                          }
-                          placeholder="Recipient name (optional)"
-                          className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs"
-                        />
+                  {isBookingExpanded ? (
+                    <>
+                      <p className="text-sm text-slate-300 mt-2">
+                        Destination: {booking.destination} | Ticket: {booking.serialNumber}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {booking.cardUrl ? (
+                          <a className="text-xs text-[var(--brand-color)] underline" href={booking.cardUrl} target="_blank" rel="noreferrer">
+                            {t('open_digital_ticket')}
+                          </a>
+                        ) : null}
+                        {booking.cardUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => shareBookingTicket(booking)}
+                            className="text-xs text-emerald-300 underline"
+                          >
+                            Share Ticket
+                          </button>
+                        ) : null}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => transferBookingTicket(booking)}
-                        disabled={transferBusyTicketId === booking.id}
-                        className="rounded-md bg-amber-500 text-slate-950 px-3 py-1 text-xs font-semibold disabled:opacity-60"
-                      >
-                        {transferBusyTicketId === booking.id ? 'Transferring...' : 'Transfer Ticket'}
-                      </button>
-                    </div>
+
+                      {canTransfer ? (
+                        <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/50 p-2 space-y-2">
+                          <p className="text-xs text-slate-300">Transfer this ticket to another phone</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              value={transferInput.phone}
+                              onChange={(e) =>
+                                setTransferInputs((prev) => ({
+                                  ...prev,
+                                  [booking.id]: {
+                                    ...transferInput,
+                                    phone: e.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="Recipient phone"
+                              className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs"
+                            />
+                            <input
+                              type="text"
+                              value={transferInput.name}
+                              onChange={(e) =>
+                                setTransferInputs((prev) => ({
+                                  ...prev,
+                                  [booking.id]: {
+                                    ...transferInput,
+                                    name: e.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="Recipient name (optional)"
+                              className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => transferBookingTicket(booking)}
+                            disabled={transferBusyTicketId === booking.id}
+                            className="rounded-md bg-amber-500 text-slate-950 px-3 py-1 text-xs font-semibold disabled:opacity-60"
+                          >
+                            {transferBusyTicketId === booking.id ? 'Transferring...' : 'Transfer Ticket'}
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
               );

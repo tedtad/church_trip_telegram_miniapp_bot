@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
           message: getMiniAppMaintenanceMessage(appSettings),
           appSettings: {
             appName: appSettings.appName,
+            appColor: appSettings.appColor,
             logoUrl: appSettings.logoUrl,
             logoFilename: appSettings.logoFilename,
             maintenanceMode: true,
@@ -121,6 +122,7 @@ export async function POST(request: NextRequest) {
       },
       appSettings: {
         appName: appSettings.appName,
+        appColor: appSettings.appColor,
         logoUrl: appSettings.logoUrl,
         logoFilename: appSettings.logoFilename,
         telegramChannelUrl: appSettings.telegramChannelUrl,

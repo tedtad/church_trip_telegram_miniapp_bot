@@ -2,6 +2,7 @@ type RawSettings = Record<string, unknown>;
 
 export type MiniAppRuntimeSettings = {
   appName: string;
+  appColor: string;
   logoUrl: string;
   logoFilename: string;
   maintenanceMode: boolean;
@@ -20,6 +21,7 @@ export type MiniAppRuntimeSettings = {
 
 const SETTINGS_FIELDS = [
   'app_name',
+  'app_color',
   'logo_url',
   'logo_filename',
   'maintenance_mode',
@@ -74,8 +76,10 @@ export function getMiniAppMaintenanceMessage(settings: Pick<MiniAppRuntimeSettin
 
 export async function getMiniAppRuntimeSettings(client: any): Promise<MiniAppRuntimeSettings> {
   const row = await loadRawMiniAppSettings(client);
+  const color = String(row.app_color || '').trim();
   return {
     appName: String(row.app_name || 'TicketHub').trim() || 'TicketHub',
+    appColor: /^#[0-9a-f]{6}$/i.test(color) ? color : '#06b6d4',
     logoUrl: String(row.logo_url || '').trim(),
     logoFilename: String(row.logo_filename || '').trim(),
     maintenanceMode: Boolean(row.maintenance_mode),
