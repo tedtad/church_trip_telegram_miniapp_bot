@@ -276,24 +276,64 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query;
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-    const tripMap = new Map<string, { tripName: string; destination: string; soldTickets: number; revenue: number }>();
+    const tripMap = new Map<
+      string,
+      {
+        tripName: string;
+        destination: string;
+        totalTickets: number;
+        pendingTickets: number;
+        confirmedTickets: number;
+        usedTickets: number;
+        cancelledTickets: number;
+        soldTickets: number;
+        revenue: number;
+      }
+    >();
     for (const row of data || []) {
-      const status = String((row as any).ticket_status || '').toLowerCase();
-      if (!['confirmed', 'used'].includes(status)) continue;
+      let status = String((row as any).ticket_status || '').toLowerCase();
+      if (status === 'canceled') status = 'cancelled';
       const trip = Array.isArray((row as any).trips) ? (row as any).trips[0] : (row as any).trips;
       const tripName = String(trip?.name || 'Trip');
       const destination = String(trip?.destination || 'N/A');
       const key = `${tripName}__${destination}`;
-      const current = tripMap.get(key) || { tripName, destination, soldTickets: 0, revenue: 0 };
-      current.soldTickets += 1;
-      current.revenue += Number((row as any).purchase_price || 0);
+      const current = tripMap.get(key) || {
+        tripName,
+        destination,
+        totalTickets: 0,
+        pendingTickets: 0,
+        confirmedTickets: 0,
+        usedTickets: 0,
+        cancelledTickets: 0,
+        soldTickets: 0,
+        revenue: 0,
+      };
+      current.totalTickets += 1;
+      if (status === 'pending') current.pendingTickets += 1;
+      if (status === 'confirmed') current.confirmedTickets += 1;
+      if (status === 'used') current.usedTickets += 1;
+      if (status === 'cancelled') current.cancelledTickets += 1;
+      if (status === 'confirmed' || status === 'used') {
+        current.soldTickets += 1;
+        current.revenue += Number((row as any).purchase_price || 0);
+      }
       tripMap.set(key, current);
     }
 
     const rows = [...tripMap.values()]
       .sort((a, b) => b.revenue - a.revenue)
       .map((row) => ({ ...row, revenue: Number(row.revenue.toFixed(2)) }));
-    const headers = ['tripName', 'destination', 'soldTickets', 'revenue'];
+    const headers = [
+      'tripName',
+      'destination',
+      'totalTickets',
+      'pendingTickets',
+      'confirmedTickets',
+      'usedTickets',
+      'cancelledTickets',
+      'soldTickets',
+      'revenue',
+    ];
     if (exportMode === 'csv') {
       return new NextResponse(toCsv(headers, rows), {
         headers: {

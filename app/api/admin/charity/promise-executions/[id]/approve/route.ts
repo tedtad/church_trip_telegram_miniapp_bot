@@ -23,9 +23,10 @@ async function updatePromiseStatusWithFallback(supabase: any, promiseId: string,
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await Promise.resolve(context.params);
     const supabase = await createAdminClient();
     const auth = await requireAdminPermission({
       supabase,
@@ -39,7 +40,7 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const notes = String(body?.notes || '').trim();
 
-    const executionId = String(params?.id || '').trim();
+    const executionId = String(id || '').trim();
     if (!executionId) {
       return NextResponse.json({ ok: false, error: 'Execution id is required' }, { status: 400 });
     }

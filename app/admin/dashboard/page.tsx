@@ -6,7 +6,9 @@ import { Card } from '@/components/ui/card';
 import { Ticket, Users, MapPin, TrendingUp } from 'lucide-react';
 
 interface DashboardStats {
+  activeTickets: number;
   totalTickets: number;
+  cancelledTickets: number;
   pendingApprovals: number;
   approvedTickets: number;
   totalCustomers: number;
@@ -20,7 +22,9 @@ interface DashboardStats {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({
+    activeTickets: 0,
     totalTickets: 0,
+    cancelledTickets: 0,
     pendingApprovals: 0,
     approvedTickets: 0,
     totalCustomers: 0,
@@ -45,6 +49,10 @@ export default function DashboardPage() {
       const { count: totalTickets } = await supabase
         .from('tickets')
         .select('*', { count: 'exact' });
+      const { count: cancelledTickets } = await supabase
+        .from('tickets')
+        .select('*', { count: 'exact' })
+        .in('ticket_status', ['cancelled', 'canceled']);
 
       // Get pending receipts
       const { count: pendingApprovals } = await supabase
@@ -106,7 +114,9 @@ export default function DashboardPage() {
       }
 
       setStats({
+        activeTickets: Math.max(0, Number(totalTickets || 0) - Number(cancelledTickets || 0)),
         totalTickets: totalTickets || 0,
+        cancelledTickets: cancelledTickets || 0,
         pendingApprovals: pendingApprovals || 0,
         approvedTickets: approvedTickets || 0,
         totalCustomers: totalCustomers || 0,
@@ -134,12 +144,20 @@ export default function DashboardPage() {
 
   const statCards = [
     {
-      title: 'Total Tickets',
-      value: stats.totalTickets,
+      title: 'Active Tickets',
+      value: stats.activeTickets,
       icon: Ticket,
       bgColor: 'bg-blue-900/20',
       iconColor: 'text-blue-400',
       borderColor: 'border-blue-800',
+    },
+    {
+      title: 'Cancelled Tickets',
+      value: stats.cancelledTickets,
+      icon: Ticket,
+      bgColor: 'bg-slate-900/20',
+      iconColor: 'text-slate-300',
+      borderColor: 'border-slate-700',
     },
     {
       title: 'Pending Approvals',

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { sendTelegramMessage } from '@/lib/telegram';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 
 type SendMode = 'single' | 'broadcast';
 
@@ -11,7 +12,7 @@ function buildMessage(title: string | undefined, message: string) {
 }
 
 async function storeNotification(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: Awaited<ReturnType<typeof createAdminClient>>,
   telegramUserId: string,
   message: string,
   title?: string
@@ -30,6 +31,16 @@ async function storeNotification(
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'bot_manage',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
+
     const { mode, telegramUserId, title, message } = await request.json();
     const sendMode = mode as SendMode;
 
@@ -42,7 +53,6 @@ export async function POST(request: NextRequest) {
     }
 
     const finalMessage = buildMessage(title, message);
-    const supabase = await createClient();
 
     if (sendMode === 'single') {
       const id = String(telegramUserId || '').trim();

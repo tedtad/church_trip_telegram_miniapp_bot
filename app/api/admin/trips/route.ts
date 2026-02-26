@@ -4,6 +4,7 @@ import { parseBankAccounts } from '@/lib/payment-config';
 import { sendTelegramMessage } from '@/lib/telegram';
 import { announceNewTripToPriorUsers, resolveMiniAppURL } from '@/lib/telegram-announcements';
 import { validateTelegramGroupNotReused } from '@/lib/telegram-group-policy';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 
 type TripInput = {
   id?: string;
@@ -189,9 +190,17 @@ async function notifyNewTripToChannel(client: any, trip: any) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'trips_manage',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
     const { data, error } = await supabase.from('trips').select('*').order('departure_date', { ascending: false });
 
     if (error) {
@@ -212,6 +221,16 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'trips_manage',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
+
     const body = (await request.json()) as TripInput;
     const payload = normalizeTripPayload(body);
     const validationError = validateTripPayload(payload);
@@ -219,7 +238,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: validationError }, { status: 400 });
     }
 
-    const supabase = await createAdminClient();
     const groupConflict = await validateTelegramGroupNotReused(supabase, {
       groupUrl: payload.telegram_group_url,
       groupChatId: payload.telegram_group_chat_id,
@@ -245,6 +263,16 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'trips_manage',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
+
     const body = (await request.json()) as TripInput;
     const id = String(body.id || '');
     if (!id) {
@@ -257,7 +285,6 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: false, error: validationError }, { status: 400 });
     }
 
-    const supabase = await createAdminClient();
     const groupConflict = await validateTelegramGroupNotReused(supabase, {
       groupUrl: payload.telegram_group_url,
       groupChatId: payload.telegram_group_chat_id,
@@ -281,12 +308,21 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'trips_manage',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
+
     const id = request.nextUrl.searchParams.get('id');
     if (!id) {
       return NextResponse.json({ ok: false, error: 'Trip id is required' }, { status: 400 });
     }
 
-    const supabase = await createAdminClient();
     const { error } = await supabase.from('trips').delete().eq('id', id);
     if (error) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

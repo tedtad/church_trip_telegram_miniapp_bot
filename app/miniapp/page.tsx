@@ -3,6 +3,11 @@
 import Script from 'next/script';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import miniAppI18n from '@/lib/i18n/miniapp.json';
+import {
+  ethiopianToGregorianYmd,
+  formatLocalizedDateTime,
+  gregorianToEthiopianYmd,
+} from '@/lib/date-localization';
 
 type MiniAppUser = {
   id: number;
@@ -47,6 +52,10 @@ type Trip = {
   cover_image_url?: string | null;
   manual_payment_note?: string | null;
   allow_gnpl?: boolean | null;
+  allow_discount?: boolean | null;
+  discount_enabled?: boolean | null;
+  enable_discount?: boolean | null;
+  has_discount?: boolean | null;
   telegram_group_url?: string | null;
   telegram_group_chat_id?: string | null;
 };
@@ -62,6 +71,12 @@ type Booking = {
   departureDate: string | null;
   referenceNumber: string | null;
   approvalStatus: string | null;
+  canRate?: boolean;
+  rating?: {
+    rating: number;
+    comment: string | null;
+    updatedAt: string | null;
+  } | null;
   cardUrl: string | null;
 };
 
@@ -164,10 +179,7 @@ declare global {
 }
 
 function formatDate(value?: string | null, lang: UiLang = 'en', naText = 'N/A') {
-  if (!value) return naText;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return naText;
-  return date.toLocaleString(lang === 'am' ? 'am-ET' : 'en-US');
+  return formatLocalizedDateTime(value, lang, naText);
 }
 
 function normalizePhoneInput(value: string) {
@@ -356,6 +368,20 @@ function getContrastTextColor(hexColor: string) {
   return luminance > 0.62 ? '#0f172a' : '#ffffff';
 }
 
+function isTripGnplEnabled(trip: Trip, settings: MiniAppSettings | null) {
+  return Boolean(settings?.gnplEnabled && trip.allow_gnpl);
+}
+
+function isTripDiscountEnabled(trip: Trip, settings: MiniAppSettings | null) {
+  if (settings?.discountEnabled === false) return false;
+  const flags = [trip.allow_discount, trip.discount_enabled, trip.enable_discount, trip.has_discount];
+  const hasExplicitTrue = flags.some((value) => value === true);
+  const hasExplicitFalse = flags.some((value) => value === false);
+  if (hasExplicitTrue) return true;
+  if (hasExplicitFalse) return false;
+  return true;
+}
+
 export default function MiniAppPage() {
   const [initData, setInitData] = useState('');
   const [user, setUser] = useState<MiniAppUser | null>(null);
@@ -388,12 +414,16 @@ export default function MiniAppPage() {
   const [pendingInviteCode, setPendingInviteCode] = useState('');
   const [pendingInviteTripId, setPendingInviteTripId] = useState('');
   const [manualFlow, setManualFlow] = useState<ManualFlow | null>(null);
+  const [manualReceiptDateEthInput, setManualReceiptDateEthInput] = useState('');
   const [manualSummaryOpen, setManualSummaryOpen] = useState(false);
   const [miniAppSettings, setMiniAppSettings] = useState<MiniAppSettings | null>(null);
   const [transferInputs, setTransferInputs] = useState<Record<string, { phone: string; name: string }>>({});
   const [transferBusyTicketId, setTransferBusyTicketId] = useState('');
+  const [ratingForms, setRatingForms] = useState<Record<string, { rating: number; comment: string }>>({});
+  const [ratingBusyBookingId, setRatingBusyBookingId] = useState('');
   const [gnplPaymentForms, setGnplPaymentForms] = useState<Record<string, { amount: string; reference: string; receiptLink: string }>>({});
   const [gnplPayingAccountId, setGnplPayingAccountId] = useState('');
+  const developerContactUrl = 'https://t.me/tedtad';
 
   const t = useCallback(
     (key: string) => I18N[uiLang]?.[key] || I18N.en[key] || key,
@@ -422,7 +452,6 @@ export default function MiniAppPage() {
     return `/miniapp/charity?initData=${encodeURIComponent(initData)}`;
   }, [initData]);
   const charityEnabled = miniAppSettings?.charityEnabled !== false;
-  const discountEnabled = miniAppSettings?.discountEnabled !== false;
   const tripsCount = trips.length;
   const bookingsCount = bookings.length;
   const activeBookingsCount = useMemo(
@@ -441,6 +470,18 @@ export default function MiniAppPage() {
       }) as React.CSSProperties,
     [brandColor, brandColorMuted, brandColorSoft, brandColorStrong, brandTextColor, uiLang]
   );
+  const openDeveloperContact = useCallback(() => {
+    const tg = window.Telegram?.WebApp;
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink(developerContactUrl);
+      return;
+    }
+    if (tg?.openLink) {
+      tg.openLink(developerContactUrl);
+      return;
+    }
+    window.open(developerContactUrl, '_blank', 'noopener,noreferrer');
+  }, [developerContactUrl]);
   const hasFieldError = useCallback((key: string) => Boolean(fieldErrors[key]), [fieldErrors]);
 
   const clearFieldError = useCallback((key: string) => {
@@ -464,12 +505,20 @@ export default function MiniAppPage() {
   const selectedMethod = useCallback(
     (trip: Trip) => {
       const current = methodByTrip[trip.id] || 'telebirr';
-      const gnplEnabledForTrip = Boolean(miniAppSettings?.gnplEnabled && trip.allow_gnpl);
+      const gnplEnabledForTrip = isTripGnplEnabled(trip, miniAppSettings);
       if (current === 'gnpl' && !gnplEnabledForTrip) return 'telebirr';
       return current;
     },
     [methodByTrip, miniAppSettings]
   );
+
+  useEffect(() => {
+    if (!manualFlow?.receiptDate) {
+      setManualReceiptDateEthInput('');
+      return;
+    }
+    setManualReceiptDateEthInput(gregorianToEthiopianYmd(manualFlow.receiptDate));
+  }, [manualFlow?.receiptDate]);
 
   const selectedQuantity = useCallback(
     (tripId: string) => Math.max(1, Number(quantityByTrip[tripId] || 1)),
@@ -627,10 +676,10 @@ export default function MiniAppPage() {
       const tripId = trip.id;
       const paymentMethod = selectedMethod(trip);
       const quantity = selectedQuantity(tripId);
-      const discountCode = discountEnabled ? selectedDiscountCode(tripId) : '';
+      const discountCode = isTripDiscountEnabled(trip, miniAppSettings) ? selectedDiscountCode(tripId) : '';
       const normalizedName = String(customerName || '').trim().replace(/\s+/g, ' ');
       const normalizedPhone = normalizePhoneInput(phoneNumber).trim();
-      const gnplEnabledForTrip = Boolean(miniAppSettings?.gnplEnabled && trip.allow_gnpl);
+      const gnplEnabledForTrip = isTripGnplEnabled(trip, miniAppSettings);
       const telegramId = Number(window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 0) || undefined;
       setBusyTripId(tripId);
       setError('');
@@ -762,7 +811,6 @@ export default function MiniAppPage() {
       loadData,
       miniAppSettings,
       phoneNumber,
-      discountEnabled,
       selectedDiscountCode,
       selectedMethod,
       selectedQuantity,
@@ -835,6 +883,24 @@ export default function MiniAppPage() {
     setGnplIdCardDataUrl(dataUrl);
     clearFieldError('gnplIdCard');
   }, [clearFieldError, setValidationError, t]);
+
+  const onManualReceiptDateInput = useCallback(
+    (value: string) => {
+      if (uiLang === 'am') {
+        setManualReceiptDateEthInput(value);
+        const converted = ethiopianToGregorianYmd(value);
+        if (converted) {
+          setManualFlow((prev) => (prev ? { ...prev, receiptDate: converted } : prev));
+        } else if (!String(value || '').trim()) {
+          setManualFlow((prev) => (prev ? { ...prev, receiptDate: '' } : prev));
+        }
+        return;
+      }
+
+      setManualFlow((prev) => (prev ? { ...prev, receiptDate: value } : prev));
+    },
+    [uiLang]
+  );
 
   const submitManualPayment = useCallback(async () => {
     if (!manualFlow) return;
@@ -1035,7 +1101,10 @@ export default function MiniAppPage() {
       const next = { ...prev };
       const tripMatched = pendingInviteTripId && trips.some((trip) => trip.id === pendingInviteTripId);
       if (tripMatched) {
-        next[pendingInviteTripId] = pendingInviteCode;
+        const matchedTrip = trips.find((trip) => trip.id === pendingInviteTripId);
+        if (matchedTrip && isTripDiscountEnabled(matchedTrip, miniAppSettings)) {
+          next[pendingInviteTripId] = pendingInviteCode;
+        }
         return next;
       }
       if (pendingInviteTripId) {
@@ -1043,7 +1112,7 @@ export default function MiniAppPage() {
       }
 
       for (const trip of trips) {
-        if (!next[trip.id]) {
+        if (isTripDiscountEnabled(trip, miniAppSettings) && !next[trip.id]) {
           next[trip.id] = pendingInviteCode;
         }
       }
@@ -1052,7 +1121,7 @@ export default function MiniAppPage() {
 
     setPendingInviteCode('');
     setPendingInviteTripId('');
-  }, [miniAppSettings?.discountEnabled, pendingInviteCode, pendingInviteTripId, trips]);
+  }, [miniAppSettings, pendingInviteCode, pendingInviteTripId, trips]);
 
   const username = useMemo(() => {
     if (!user) return '';
@@ -1149,11 +1218,11 @@ export default function MiniAppPage() {
       setUser((prev) =>
         prev
           ? {
-              ...prev,
-              firstName: firstName || prev.firstName,
-              lastName: lastName || '',
-              phoneNumber: String(json.phoneNumber || normalized),
-            }
+            ...prev,
+            firstName: firstName || prev.firstName,
+            lastName: lastName || '',
+            phoneNumber: String(json.phoneNumber || normalized),
+          }
           : prev
       );
       setNotice(t('notice_phone_saved'));
@@ -1179,7 +1248,10 @@ export default function MiniAppPage() {
 
   const shareBookingTicket = useCallback(
     async (booking: Booking) => {
-      const ticketUrl = String(booking.cardUrl || '').trim();
+      const baseTicketUrl = String(booking.cardUrl || '').trim();
+      const ticketUrl = baseTicketUrl
+        ? `${baseTicketUrl}${baseTicketUrl.includes('?') ? '&' : '?'}lang=${encodeURIComponent(uiLang)}`
+        : '';
       if (!ticketUrl) {
         setError(t('open_digital_ticket'));
         return;
@@ -1195,7 +1267,7 @@ export default function MiniAppPage() {
           });
           return;
         }
-      } catch {}
+      } catch { }
 
       try {
         await navigator.clipboard.writeText(text);
@@ -1204,7 +1276,7 @@ export default function MiniAppPage() {
         setError('Unable to share ticket');
       }
     },
-    [t]
+    [t, uiLang]
   );
 
   const transferBookingTicket = useCallback(
@@ -1256,6 +1328,67 @@ export default function MiniAppPage() {
     [apiFetch, initData, loadData, t, transferInputs]
   );
 
+  const submitTripRating = useCallback(
+    async (booking: Booking) => {
+      if (!booking?.id) return;
+      if (!booking.canRate) {
+        setError(t('rating_only_after_checkin'));
+        return;
+      }
+
+      const form = ratingForms[booking.id] || {
+        rating: Number(booking.rating?.rating || 0),
+        comment: String(booking.rating?.comment || ''),
+      };
+      if (!Number.isInteger(form.rating) || form.rating < 1 || form.rating > 5) {
+        setError(t('rating_validation_required'));
+        return;
+      }
+
+      setRatingBusyBookingId(booking.id);
+      setError('');
+      setNotice('');
+      try {
+        const response = await apiFetch('/api/miniapp/trips/rating', {
+          method: 'POST',
+          body: JSON.stringify({
+            initData,
+            ticketId: booking.id,
+            rating: form.rating,
+            comment: String(form.comment || '').trim() || undefined,
+          }),
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok || !json?.ok) {
+          throw new Error(json?.error || 'Failed to save rating');
+        }
+
+        const savedRating = {
+          rating: Number(json?.rating?.rating || form.rating),
+          comment: json?.rating?.comment ? String(json.rating.comment) : String(form.comment || '').trim() || null,
+          updatedAt: json?.rating?.updated_at ? String(json.rating.updated_at) : new Date().toISOString(),
+        };
+        setBookings((prev) =>
+          prev.map((row) =>
+            row.id === booking.id
+              ? {
+                  ...row,
+                  canRate: true,
+                  rating: savedRating,
+                }
+              : row
+          )
+        );
+        setNotice(t('rating_saved'));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to save rating');
+      } finally {
+        setRatingBusyBookingId('');
+      }
+    },
+    [apiFetch, initData, ratingForms, t]
+  );
+
   const visibleBookings = bookings.filter((booking) =>
     showExpiredBookings ? true : !isExpiredByDeparture(booking.departureDate)
   );
@@ -1271,7 +1404,13 @@ export default function MiniAppPage() {
           <p className="text-xs tracking-[0.18em] uppercase text-amber-300">{displayAppName}</p>
           <h1 className="text-xl font-semibold">{t('page_title')}</h1>
           <p className="text-sm text-amber-100">{maintenanceMessage}</p>
-          <a href='https://t.me/tedtad' target='_blank' rel='noreferrer'><p className="text-xs text-slate-400">Developed by @Teddy</p></a>
+          <button
+            type="button"
+            onClick={openDeveloperContact}
+            className="text-xs text-slate-400 underline underline-offset-2 hover:text-slate-200"
+          >
+            Developed by @tedtad
+          </button>
         </section>
       </main>
     );
@@ -1285,13 +1424,31 @@ export default function MiniAppPage() {
       <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
       <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex flex-col items-center gap-2 px-4">
         {error ? (
-          <div className="w-full max-w-2xl rounded-xl border border-red-400 bg-red-500/90 px-4 py-3 text-sm font-medium text-white shadow-xl">
-            ❌ {error}
+          <div className="pointer-events-auto w-full max-w-2xl rounded-xl border border-red-400 bg-red-500/90 px-4 py-3 text-sm font-medium text-white shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => setError('')}
+                className="rounded border border-white/30 px-2 py-0.5 text-xs hover:bg-white/10"
+              >
+                x
+              </button>
+            </div>
           </div>
         ) : null}
         {notice ? (
-          <div className="w-full max-w-2xl rounded-xl border border-emerald-400 bg-emerald-500/90 px-4 py-3 text-sm font-medium text-white shadow-xl whitespace-pre-line">
-            ✅ {notice}
+          <div className="pointer-events-auto w-full max-w-2xl rounded-xl border border-emerald-400 bg-emerald-500/90 px-4 py-3 text-sm font-medium text-white shadow-xl whitespace-pre-line">
+            <div className="flex items-start justify-between gap-3">
+              <span>{notice}</span>
+              <button
+                type="button"
+                onClick={() => setNotice('')}
+                className="rounded border border-white/30 px-2 py-0.5 text-xs hover:bg-white/10"
+              >
+                x
+              </button>
+            </div>
           </div>
         ) : null}
       </div>
@@ -1313,112 +1470,83 @@ export default function MiniAppPage() {
               <p className="truncate text-xs text-slate-400">{logoLabel}</p>
             </div>
           </div>
-          
-          <h1 className="text-2xl font-semibold mt-1">✈️ {t('page_title')}</h1>
+
+          <h1 className="text-2xl font-semibold mt-1">{t('page_title')}</h1>
           {charityEnabled ? (
             <div className="mt-3">
               <a
                 href={charityHref}
                 className="inline-flex rounded-lg bg-gradient-to-r from-red-600 to-red-700 px-3 py-1.5 text-center text-xs font-medium hover:from-red-700 hover:to-red-800 transition-all"
               >
-                ❤️ {t('make_a_donation')}
+                {t('make_a_donation')}
               </a>
             </div>
           ) : null}
           <div className="mt-2 space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm text-slate-300">👤 {username || t('telegram_customer')}</p>
+              <p className="text-sm text-slate-300">{username || t('telegram_customer')}</p>
               <button
                 type="button"
                 onClick={() => setBasicInfoCollapsed((prev) => !prev)}
                 className="rounded-md border border-[color:var(--brand-color-soft)] bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
               >
-                {basicInfoCollapsed ? 'Expand basic info' : 'Collapse basic info'}
+                {basicInfoCollapsed ? t('expand_basic_info') : t('collapse_basic_info')}
               </button>
             </div>
             {!basicInfoCollapsed ? (
               <div className="flex flex-col gap-2 sm:items-end">
-              <label className="inline-flex items-center gap-2 text-xs text-slate-300">
-                <span>🌐 {t('language')}</span>
-                <select
-                  value={uiLang}
-                  disabled={languageSaving}
-                  onChange={(e) => changeLanguage((e.target.value as UiLang) || 'am')}
-                  className="rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-xs text-slate-100"
-                >
-                  <option value="am">{t('lang_am')}</option>
-                  <option value="en">{t('lang_en')}</option>
-                </select>
-              </label>
+                <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+                  <span>{t('language')}</span>
+                  <select
+                    value={uiLang}
+                    disabled={languageSaving}
+                    onChange={(e) => changeLanguage((e.target.value as UiLang) || 'am')}
+                    className="rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-xs text-slate-100"
+                  >
+                    <option value="am">{t('lang_am')}</option>
+                    <option value="en">{t('lang_en')}</option>
+                  </select>
+                </label>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <span className="text-xs text-slate-300 whitespace-nowrap">📝 {t('customer_name')}</span>
-                <input
-                  type="text"
-                  value={customerName}
-                  onChange={(e) => {
-                    clearFieldError('customerName');
-                    setCustomerName(String(e.target.value || '').replace(/\s+/g, ' ').trimStart());
-                  }}
-                  placeholder={t('customer_name_placeholder')}
-                  className={`rounded-md border bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-52 ${
-                    hasFieldError('customerName') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
-                  }`}
-                />
-              </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <span className="text-xs text-slate-300 whitespace-nowrap">{t('customer_name')}</span>
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => {
+                      clearFieldError('customerName');
+                      setCustomerName(String(e.target.value || '').replace(/\s+/g, ' ').trimStart());
+                    }}
+                    placeholder={t('customer_name_placeholder')}
+                    className={`rounded-md border bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-52 ${hasFieldError('customerName') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                      }`}
+                  />
+                </div>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <span className="text-xs text-slate-300 whitespace-nowrap">☎️ {t('phone_number')}</span>
-                <input
-                  type="tel"
-                  value={phoneNumber}
-                  onChange={(e) => {
-                    clearFieldError('phoneNumber');
-                    setPhoneNumber(normalizePhoneInput(e.target.value));
-                  }}
-                  placeholder={t('phone_placeholder')}
-                  className={`rounded-md border bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-48 ${
-                    hasFieldError('phoneNumber') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
-                  }`}
-                />
-              </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <span className="text-xs text-slate-300 whitespace-nowrap">{t('id_card_scan')}</span>
-                <input
-                  type="file"
-                  accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
-                  onChange={async (e) => {
-                    try {
-                      await onGnplIdCardFile(e.target.files?.[0] || null);
-                    } catch {
-                      setError(t('error_read_receipt_failed'));
-                    }
-                  }}
-                  className={`rounded-md border bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-64 ${
-                    hasFieldError('gnplIdCard') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
-                  }`}
-                />
-              </div>
-              {gnplIdCardFileName ? (
-                <p className="text-[11px] text-[var(--brand-color)] w-full text-left sm:text-right">
-                  {t('id_card_selected')}: {gnplIdCardFileName}
-                </p>
-              ) : null}
-              {miniAppSettings?.gnplEnabled ? (
-                <p className="text-[11px] text-amber-300 w-full text-left sm:text-right">
-                  {t('gnpl_hint')}
-                </p>
-              ) : null}
-              <div className="w-full flex justify-end">
-                <button
-                  type="button"
-                  onClick={saveProfile}
-                  disabled={profileSaving}
-                  className="rounded-md border border-[color:var(--brand-color-soft)] bg-[color:var(--brand-color-muted)] px-3 py-1 text-xs text-white hover:opacity-90 disabled:opacity-60"
-                >
-                  {profileSaving ? 'Saving profile...' : 'Save profile'}
-                </button>
-              </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <span className="text-xs text-slate-300 whitespace-nowrap">{t('phone_number')}</span>
+                  <input
+                    type="tel"
+                    value={phoneNumber}
+                    onChange={(e) => {
+                      clearFieldError('phoneNumber');
+                      setPhoneNumber(normalizePhoneInput(e.target.value));
+                    }}
+                    placeholder={t('phone_placeholder')}
+                    className={`rounded-md border bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-48 ${hasFieldError('phoneNumber') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                      }`}
+                  />
+                </div>
+                <div className="w-full flex justify-end">
+                  <button
+                    type="button"
+                    onClick={saveProfile}
+                    disabled={profileSaving}
+                    className="rounded-md border border-[color:var(--brand-color-soft)] bg-[color:var(--brand-color-muted)] px-3 py-1 text-xs text-white hover:opacity-90 disabled:opacity-60"
+                  >
+                    {profileSaving ? t('saving_profile') : t('save_profile')}
+                  </button>
+                </div>
               </div>
             ) : null}
           </div>
@@ -1441,35 +1569,35 @@ export default function MiniAppPage() {
 
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 px-3 py-2">
-            <p className="text-[11px] text-slate-400">Trips</p>
+            <p className="text-[11px] text-slate-400">{t('trips_label')}</p>
             <p className="text-lg font-semibold text-[var(--brand-color)]">{tripsCount}</p>
           </div>
           <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 px-3 py-2">
-            <p className="text-[11px] text-slate-400">Bookings</p>
+            <p className="text-[11px] text-slate-400">{t('bookings_label')}</p>
             <p className="text-lg font-semibold text-slate-100">{bookingsCount}</p>
           </div>
           <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 px-3 py-2">
-            <p className="text-[11px] text-slate-400">Active</p>
+            <p className="text-[11px] text-slate-400">{t('active_label')}</p>
             <p className="text-lg font-semibold text-emerald-300">{activeBookingsCount}</p>
           </div>
         </div>
 
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-medium">?? {t('available_trips')}</h2>
+          <h2 className="text-lg font-medium">{t('available_trips')}</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setTripsSectionCollapsed((prev) => !prev)}
               className="rounded-lg border border-slate-700 px-3 py-1 text-xs hover:bg-slate-800"
             >
-              {tripsSectionCollapsed ? 'Expand' : 'Collapse'}
+              {tripsSectionCollapsed ? t('expand') : t('collapse')}
             </button>
             <button
               type="button"
               onClick={loadData}
               className="rounded-lg border border-[color:var(--brand-color-soft)] px-3 py-1 text-sm text-[var(--brand-color)] hover:bg-[color:var(--brand-color-muted)] hover:text-white"
             >
-              ?? {t('refresh')}
+              {t('refresh')}
             </button>
           </div>
         </div>
@@ -1494,6 +1622,8 @@ export default function MiniAppPage() {
               const method = selectedMethod(trip);
               const quantity = selectedQuantity(trip.id);
               const isBusy = busyTripId === trip.id;
+              const gnplEnabledForTrip = isTripGnplEnabled(trip, miniAppSettings);
+              const discountEnabledForTrip = isTripDiscountEnabled(trip, miniAppSettings);
               const sanitizedDescriptionHtml = sanitizeTripDescriptionHtml(trip.description || '');
               const descriptionText = stripHtmlToText(sanitizedDescriptionHtml || trip.description || '');
               const isDescriptionLong = descriptionText.length > MINIAPP_TRIP_DESCRIPTION_PREVIEW_LIMIT;
@@ -1506,17 +1636,17 @@ export default function MiniAppPage() {
                 <article key={trip.id} className="rounded-2xl border border-slate-700/70 bg-slate-900/65 overflow-hidden">
                   {image ? <img src={image} alt={trip.name || t('trip_fallback')} className="h-36 w-full object-cover" /> : null}
                   <div className="p-4 space-y-2">
-                    <h3 className="text-lg font-semibold">🎯 {trip.name || t('trip_fallback')}</h3>
+                    <h3 className="text-lg font-semibold">{trip.name || t('trip_fallback')}</h3>
                     <p className="text-sm text-slate-300">
-                      📍 {trip.destination || t('na')} | 📅 {formatDate(trip.departure_date, uiLang, t('na'))}
+                      {trip.destination || t('na')} | {formatDate(trip.departure_date, uiLang, t('na'))}
                     </p>
                     {trip.arrival_date ? (
                       <p className="text-xs text-slate-400">
-                        🏁 Arrival: {formatDate(trip.arrival_date, uiLang, t('na'))}
+                        {t('arrival')}: {formatDate(trip.arrival_date, uiLang, t('na'))}
                       </p>
                     ) : null}
                     <p className="text-sm text-slate-200">
-                      💰 ETB {Number(trip.price_per_ticket || 0).toFixed(2)} | 💺 {t('seats')} {trip.available_seats ?? 0}/
+                      ETB {Number(trip.price_per_ticket || 0).toFixed(2)} | {t('seats')} {trip.available_seats ?? 0}/
                       {trip.total_seats ?? 0}
                     </p>
                     {descriptionText ? (
@@ -1540,7 +1670,7 @@ export default function MiniAppPage() {
                             }
                             className="text-[11px] text-[var(--brand-color)] hover:opacity-80 underline"
                           >
-                            {isDescriptionExpanded ? 'Less' : 'More'}
+                            {isDescriptionExpanded ? t('less') : t('more')}
                           </button>
                         ) : null}
                       </div>
@@ -1560,7 +1690,7 @@ export default function MiniAppPage() {
 
                     <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                       <div className="flex items-center gap-2">
-                        <label className="text-xs text-slate-300 whitespace-nowrap">🎫{t('number_of_tickets')}</label>
+                        <label className="text-xs text-slate-300 whitespace-nowrap">{t('number_of_tickets')}</label>
                         <input
                           min={1}
                           type="number"
@@ -1574,7 +1704,7 @@ export default function MiniAppPage() {
                           }
                         />
                       </div>
-                      {discountEnabled ? (
+                      {discountEnabledForTrip ? (
                         <input
                           type="text"
                           value={selectedDiscountCode(trip.id)}
@@ -1600,11 +1730,29 @@ export default function MiniAppPage() {
                       >
                         <option value="telebirr">{t('telebirr_manual')}</option>
                         <option value="bank">{t('bank_transfer')}</option>
-                        {miniAppSettings?.gnplEnabled && trip.allow_gnpl ? (
+                        {gnplEnabledForTrip ? (
                           <option value="gnpl">{t('gnpl_method')}</option>
                         ) : null}
                         <option value="telebirr_auto">{t('telebirr_auto')}</option>
                       </select>
+                      {gnplEnabledForTrip && method === 'gnpl' ? (
+                        <label className="flex-1 text-xs text-slate-300">
+                          <span className="mb-1 block">{t('id_card_scan')}</span>
+                          <input
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+                            onChange={async (e) => {
+                              try {
+                                await onGnplIdCardFile(e.target.files?.[0] || null);
+                              } catch {
+                                setError(t('error_read_receipt_failed'));
+                              }
+                            }}
+                            className={`w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-xs text-slate-100 ${hasFieldError('gnplIdCard') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                              }`}
+                          />
+                        </label>
+                      ) : null}
                       <button
                         type="button"
                         disabled={isBusy}
@@ -1614,6 +1762,11 @@ export default function MiniAppPage() {
                         {isBusy ? t('starting') : t('book')}
                       </button>
                     </div>
+                    {gnplEnabledForTrip && method === 'gnpl' && gnplIdCardFileName ? (
+                      <p className="text-[11px] text-[var(--brand-color)]">
+                        {t('id_card_selected')}: {gnplIdCardFileName}
+                      </p>
+                    ) : null}
                   </div>
                 </article>
               );
@@ -1624,21 +1777,21 @@ export default function MiniAppPage() {
         {manualFlow ? (
           <section className="rounded-2xl border border-[color:var(--brand-color-soft)] bg-slate-900/70 p-4 space-y-3">
             <h2 className="text-lg font-semibold">
-              💳 {t('manual_payment')} - {manualFlow.tripName}
+              {t('manual_payment')} - {manualFlow.tripName}
             </h2>
-            <p className="text-sm text-slate-300">📋 {t('manual_step_desc')}</p>
+            <p className="text-sm text-slate-300">{t('manual_step_desc')}</p>
             <button
               type="button"
               onClick={() => setManualSummaryOpen((prev) => !prev)}
               className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 hover:bg-slate-800/60"
             >
-              {manualSummaryOpen ? 'Hide booking summary' : 'Show booking summary'}
+              {manualSummaryOpen ? t('hide_booking_summary') : t('show_booking_summary')}
             </button>
             {manualSummaryOpen ? (
               <div className="rounded-lg border border-slate-700/70 bg-slate-950/50 p-3 text-xs text-slate-300 space-y-1">
-                <p>Trip: {manualFlow.tripName}</p>
-                <p>Customer: {String(customerName || '-')}</p>
-                <p>Phone: {String(phoneNumber || '-')}</p>
+                <p>{t('trip_label')}: {manualFlow.tripName}</p>
+                <p>{t('customer_label')}: {String(customerName || '-')}</p>
+                <p>{t('phone_label')}: {String(phoneNumber || '-')}</p>
                 {selectedManualTrip?.description ? (
                   <p className="text-slate-400">{selectedManualTrip.description}</p>
                 ) : null}
@@ -1647,7 +1800,7 @@ export default function MiniAppPage() {
 
             {manualFlow.paymentMethod === 'bank' ? (
               <div className="rounded-lg border border-slate-700/70 bg-slate-950/50 p-3 space-y-2">
-                <p className="text-sm font-medium">🏦 {t('bank_transfer_details')}</p>
+                <p className="text-sm font-medium">{t('bank_transfer_details')}</p>
                 {manualFlow.bankAccounts.length > 1 ? (
                   <select
                     value={manualFlow.selectedBankIndex}
@@ -1702,7 +1855,7 @@ export default function MiniAppPage() {
               </div>
             ) : (
               <div className="rounded-lg border border-slate-700/70 bg-slate-950/50 p-3 text-sm text-slate-200 space-y-1">
-                <p className="font-medium">📱 {t('telebirr_manual_details')}</p>
+                <p className="font-medium">{t('telebirr_manual_details')}</p>
                 <p className="flex items-center justify-between gap-2">
                   <span>{t('account_name')}: {manualFlow.telebirrManualAccountName || t('not_configured')}</span>
                   {manualFlow.telebirrManualAccountName ? (
@@ -1757,9 +1910,8 @@ export default function MiniAppPage() {
                     clearFieldError('manualAmountPaid');
                     setManualFlow((prev) => (prev ? { ...prev, amountPaid: e.target.value } : prev));
                   }}
-                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${
-                    hasFieldError('manualAmountPaid') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
-                  }`}
+                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${hasFieldError('manualAmountPaid') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                    }`}
                 />
               </label>
 
@@ -1772,15 +1924,14 @@ export default function MiniAppPage() {
                     clearFieldError('manualReference');
                     setManualFlow((prev) => (prev ? { ...prev, referenceNumber: e.target.value } : prev));
                   }}
-                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${
-                    hasFieldError('manualReference') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
-                  }`}
+                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${hasFieldError('manualReference') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                    }`}
                   placeholder={t('ref_placeholder')}
                 />
               </label>
 
               <label className="text-sm sm:col-span-2">
-                <span className="text-slate-300">Receipt Link (optional)</span>
+                <span className="text-slate-300">{t('receipt_link_optional')}</span>
                 <input
                   type="url"
                   value={manualFlow.receiptLink}
@@ -1789,25 +1940,38 @@ export default function MiniAppPage() {
                     clearFieldError('manualReceipt');
                     setManualFlow((prev) => (prev ? { ...prev, receiptLink: e.target.value } : prev));
                   }}
-                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${
-                    hasFieldError('manualReceiptLink') || hasFieldError('manualReceipt')
-                      ? 'border-red-500 ring-1 ring-red-500'
-                      : 'border-slate-700'
-                  }`}
+                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${hasFieldError('manualReceiptLink') || hasFieldError('manualReceipt')
+                    ? 'border-red-500 ring-1 ring-red-500'
+                    : 'border-slate-700'
+                    }`}
                   placeholder="https://.../receipt?ref=TX123&date=2026-02-25"
                 />
               </label>
 
               <label className="text-sm sm:col-span-2">
-                <span className="text-slate-300">Receipt Date (optional)</span>
-                <input
-                  type="date"
-                  value={manualFlow.receiptDate}
-                  onChange={(e) =>
-                    setManualFlow((prev) => (prev ? { ...prev, receiptDate: e.target.value } : prev))
-                  }
-                  className="mt-1 w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
-                />
+                <span className="text-slate-300">{t('receipt_date_optional')}</span>
+                {uiLang === 'am' ? (
+                  <>
+                    <input
+                      type="text"
+                      value={manualReceiptDateEthInput}
+                      onChange={(e) => onManualReceiptDateInput(e.target.value)}
+                      className="mt-1 w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
+                      placeholder={t('ethiopian_date_placeholder')}
+                    />
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {t('ethiopian_date_hint')}
+                      {manualFlow.receiptDate ? ` (${t('gregorian_label')}: ${manualFlow.receiptDate})` : ''}
+                    </p>
+                  </>
+                ) : (
+                  <input
+                    type="date"
+                    value={manualFlow.receiptDate}
+                    onChange={(e) => onManualReceiptDateInput(e.target.value)}
+                    className="mt-1 w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
+                  />
+                )}
               </label>
 
               <label className="text-sm sm:col-span-2">
@@ -1822,25 +1986,24 @@ export default function MiniAppPage() {
                       setError(t('error_read_receipt_failed'));
                     }
                   }}
-                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${
-                    hasFieldError('manualReceipt') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
-                  }`}
+                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${hasFieldError('manualReceipt') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                    }`}
                 />
               </label>
             </div>
 
             <div className="text-xs text-slate-300 space-y-1">
               <p>
-                💵 {t('base_total')}: ETB {Number(manualFlow.baseAmount || 0).toFixed(2)}
+                {t('base_total')}: ETB {Number(manualFlow.baseAmount || 0).toFixed(2)}
               </p>
               {manualFlow.discountPercent > 0 ? (
                 <p>
-                  🎁 {t('discount')} ({manualFlow.discountCode || '-'}, {manualFlow.discountPercent}%): -ETB{' '}
+                  {t('discount')} ({manualFlow.discountCode || '-'}, {manualFlow.discountPercent}%): -ETB{' '}
                   {Number(manualFlow.discountAmount || 0).toFixed(2)}
                 </p>
               ) : null}
               <p>
-                💰 {t('expected_total')}: ETB {manualExpectedAmount.toFixed(2)} {t('for')} {manualFlow.quantity}{' '}
+                {t('expected_total')}: ETB {manualExpectedAmount.toFixed(2)} {t('for')} {manualFlow.quantity}{' '}
                 {t('tickets')}
               </p>
             </div>
@@ -1884,7 +2047,7 @@ export default function MiniAppPage() {
                       </span>
                     </div>
                     <p className="text-xs text-slate-300">
-                      Due: {account.dueDate || '-'} | Outstanding: ETB {Number(account.totalDue || 0).toFixed(2)} |
+                      Due: {formatDate(account.dueDate, uiLang, '-')} | Outstanding: ETB {Number(account.totalDue || 0).toFixed(2)} |
                       Penalty: ETB {Number(account.penaltyOutstanding || 0).toFixed(2)}
                     </p>
                     {account.canPay ? (
@@ -1900,7 +2063,7 @@ export default function MiniAppPage() {
                               [account.id]: { ...form, amount: e.target.value },
                             }))
                           }
-                          placeholder="Amount (ETB)"
+                          placeholder={t('gnpl_amount_placeholder')}
                           className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs"
                         />
                         <input
@@ -1912,7 +2075,7 @@ export default function MiniAppPage() {
                               [account.id]: { ...form, reference: e.target.value },
                             }))
                           }
-                          placeholder="Payment reference"
+                          placeholder={t('gnpl_reference_placeholder')}
                           className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs"
                         />
                         <input
@@ -1924,7 +2087,7 @@ export default function MiniAppPage() {
                               [account.id]: { ...form, receiptLink: e.target.value },
                             }))
                           }
-                          placeholder="Receipt link (optional)"
+                          placeholder={t('gnpl_receipt_link_optional')}
                           className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs"
                         />
                         <button
@@ -1933,12 +2096,12 @@ export default function MiniAppPage() {
                           disabled={isPaying}
                           className="rounded-md bg-amber-500 text-slate-950 px-3 py-2 text-xs font-semibold disabled:opacity-60 sm:col-span-3"
                         >
-                          {isPaying ? 'Submitting payment...' : 'Submit GNPL Payment'}
+                          {isPaying ? t('gnpl_submitting_payment') : t('gnpl_submit_payment')}
                         </button>
                       </div>
                     ) : (
                       <p className="text-xs text-slate-400">
-                        Payments are enabled only after admin approval.
+                        {t('gnpl_payment_waiting_approval')}
                       </p>
                     )}
                   </div>
@@ -1950,21 +2113,21 @@ export default function MiniAppPage() {
 
         <div className="pt-2">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-lg font-medium">📋 {t('my_bookings')}</h2>
+            <h2 className="text-lg font-medium">{t('my_bookings')}</h2>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setBookingsSectionCollapsed((prev) => !prev)}
                 className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
               >
-                {bookingsSectionCollapsed ? 'Expand' : 'Collapse'}
+                {bookingsSectionCollapsed ? t('expand') : t('collapse')}
               </button>
               <button
                 type="button"
                 onClick={() => setShowExpiredBookings((prev) => !prev)}
                 className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
               >
-                {showExpiredBookings ? `??? ${t('hide_expired_tickets')}` : `?? ${t('show_expired_tickets')}`}
+                {showExpiredBookings ? t('hide_expired_tickets') : t('show_expired_tickets')}
               </button>
             </div>
           </div>
@@ -1980,12 +2143,22 @@ export default function MiniAppPage() {
               const normalizedStatus = String(booking.status || '').toLowerCase();
               const canTransfer =
                 normalizedStatus === 'confirmed' && !isExpiredByDeparture(booking.departureDate);
+              const localizedCardUrl = booking.cardUrl
+                ? `${booking.cardUrl}${String(booking.cardUrl).includes('?') ? '&' : '?'}lang=${encodeURIComponent(
+                    uiLang
+                  )}`
+                : null;
+              const canRate = Boolean(booking.canRate || normalizedStatus === 'used');
+              const ratingForm = ratingForms[booking.id] || {
+                rating: Number(booking.rating?.rating || 0),
+                comment: String(booking.rating?.comment || ''),
+              };
               const isBookingExpanded = Boolean(expandedBookingIds[booking.id]);
 
               return (
                 <div key={booking.id} className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-medium">Trip: {booking.tripName}</p>
+                    <p className="font-medium">{t('trip_label')}: {booking.tripName}</p>
                     <button
                       type="button"
                       onClick={() =>
@@ -1996,7 +2169,7 @@ export default function MiniAppPage() {
                       }
                       className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
                     >
-                      {isBookingExpanded ? 'Collapse' : 'Expand'}
+                      {isBookingExpanded ? t('collapse') : t('expand')}
                     </button>
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
@@ -2009,12 +2182,12 @@ export default function MiniAppPage() {
                         Destination: {booking.destination} | Ticket: {booking.serialNumber}
                       </p>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {booking.cardUrl ? (
-                          <a className="text-xs text-[var(--brand-color)] underline" href={booking.cardUrl} target="_blank" rel="noreferrer">
+                        {localizedCardUrl ? (
+                          <a className="text-xs text-[var(--brand-color)] underline" href={localizedCardUrl} target="_blank" rel="noreferrer">
                             {t('open_digital_ticket')}
                           </a>
                         ) : null}
-                        {booking.cardUrl ? (
+                        {localizedCardUrl ? (
                           <button
                             type="button"
                             onClick={() => shareBookingTicket(booking)}
@@ -2070,6 +2243,70 @@ export default function MiniAppPage() {
                           </button>
                         </div>
                       ) : null}
+
+                      {canRate ? (
+                        <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/50 p-2 space-y-2">
+                          <p className="text-xs text-slate-300">{t('rate_this_trip')}</p>
+                          {booking.rating ? (
+                            <p className="text-xs text-emerald-300">
+                              {t('your_rating')}: {booking.rating.rating}/5
+                              {booking.rating.updatedAt
+                                ? ` (${formatDate(booking.rating.updatedAt, uiLang, t('na'))})`
+                                : ''}
+                            </p>
+                          ) : null}
+                          <div className="flex flex-wrap gap-1">
+                            {[1, 2, 3, 4, 5].map((value) => {
+                              const selected = Number(ratingForm.rating || 0) === value;
+                              return (
+                                <button
+                                  key={`${booking.id}-rate-${value}`}
+                                  type="button"
+                                  onClick={() =>
+                                    setRatingForms((prev) => ({
+                                      ...prev,
+                                      [booking.id]: {
+                                        ...ratingForm,
+                                        rating: value,
+                                      },
+                                    }))
+                                  }
+                                  className={`rounded-md border px-2 py-1 text-xs ${
+                                    selected
+                                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                                      : 'border-slate-600 bg-slate-900 text-slate-300'
+                                  }`}
+                                >
+                                  {value}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <textarea
+                            rows={2}
+                            value={ratingForm.comment}
+                            onChange={(e) =>
+                              setRatingForms((prev) => ({
+                                ...prev,
+                                [booking.id]: {
+                                  ...ratingForm,
+                                  comment: String(e.target.value || ''),
+                                },
+                              }))
+                            }
+                            placeholder={t('rating_comment_optional')}
+                            className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => submitTripRating(booking)}
+                            disabled={ratingBusyBookingId === booking.id}
+                            className="rounded-md bg-emerald-500 px-3 py-1 text-xs font-semibold text-slate-950 disabled:opacity-60"
+                          >
+                            {ratingBusyBookingId === booking.id ? t('submitting_rating') : t('submit_rating')}
+                          </button>
+                        </div>
+                      ) : null}
                     </>
                   ) : null}
                 </div>
@@ -2077,9 +2314,15 @@ export default function MiniAppPage() {
             })}
           </div>
         </div>
-        <p className="text-center text-xs text-slate-500 pt-2">Developed by @Teddy</p>
+        <p className="text-xs text-slate-400">
+          Developed by{" "}
+          <button type="button" onClick={openDeveloperContact} className="underline hover:text-white">
+            @tedtad
+          </button>
+        </p>
       </section>
     </main>
   );
 }
+
 

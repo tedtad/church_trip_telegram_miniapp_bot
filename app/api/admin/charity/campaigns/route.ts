@@ -1,5 +1,6 @@
-import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 import { postCharityCampaignAnnouncement } from '@/lib/charity-automation';
 import { announceNewCampaignToPriorUsers } from '@/lib/telegram-announcements';
 import { validateTelegramGroupNotReused } from '@/lib/telegram-group-policy';
@@ -16,8 +17,16 @@ function detectMissingColumn(error: unknown): string | null {
   return null;
 }
 
-export async function GET() {
-  const supabase = await createClient();
+export async function GET(request: NextRequest) {
+  const supabase = await createAdminClient();
+  const auth = await requireAdminPermission({
+    supabase,
+    request,
+    permission: 'charity_manage',
+  });
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
 
   const { data, error } = await supabase
     .from('charity_campaigns')
@@ -32,16 +41,16 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const body = await request.json();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const supabase = await createAdminClient();
+  const auth = await requireAdminPermission({
+    supabase,
+    request,
+    permission: 'charity_manage',
+  });
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
+  const body = await request.json();
 
   const name = String(body?.name || '').trim();
   const cause = String(body?.cause || '').trim();
@@ -91,7 +100,7 @@ export async function POST(request: NextRequest) {
     status,
     start_date: startDate ? new Date(startDate).toISOString() : new Date().toISOString(),
     end_date: endDate ? new Date(endDate).toISOString() : null,
-    created_by: user.id,
+    created_by: auth.actor.id,
     telegram_channel_chat_id: channelChatId || null,
     telegram_channel_url: channelUrl || null,
     telegram_group_chat_id: groupChatId || null,

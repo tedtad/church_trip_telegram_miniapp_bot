@@ -1,10 +1,12 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import {
   getTelebirrConfig,
   getTelebirrConfigStatus,
   getTelebirrGatewayProxyURL,
   resolveTelebirrGatewayBaseURL,
 } from '@/lib/telebirr';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 
 function normalizeBaseURL(raw: string) {
   return String(raw || '').trim().replace(/\/+$/, '');
@@ -84,8 +86,18 @@ async function fetchProbe(url: string, init: RequestInit, timeoutMs = 12000) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'bot_manage',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
+
     const cfg = getTelebirrConfig();
     const status = getTelebirrConfigStatus();
     const gatewayProxyURL = getTelebirrGatewayProxyURL();

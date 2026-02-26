@@ -1,9 +1,18 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdminPermission } from '@/lib/admin-rbac'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'discounts_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
+    }
     const body = await request.json()
 
     const { code, discountPercent, maxUses, tripId, validFrom, expiresAt, isActive } = body

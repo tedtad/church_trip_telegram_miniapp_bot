@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getTelebirrConfigStatus } from '@/lib/telebirr';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -18,9 +19,17 @@ type StatusResponse = {
   telebirrMissing: string[];
 };
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'bot_manage',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
 
     const [{ count: telegramUsers }, { count: activeUsers }, { data: tripsData }, { count: pendingApprovals }] =
       await Promise.all([

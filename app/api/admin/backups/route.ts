@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getBackupHistory } from '@/lib/backup'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdminPermission } from '@/lib/admin-rbac'
 
 type BackupLogMetadata = {
   backupId?: string
@@ -11,6 +12,16 @@ type BackupLogMetadata = {
  */
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'backups_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+    }
+
     const limit = request.nextUrl.searchParams.get('limit') || '30'
     const backups = await getBackupHistory(parseInt(limit))
 
@@ -36,6 +47,16 @@ export async function GET(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'backups_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+    }
+
     const id = request.nextUrl.searchParams.get('id')
     if (!id) {
       return NextResponse.json(
@@ -43,8 +64,6 @@ export async function DELETE(request: NextRequest) {
         { status: 400 }
       )
     }
-
-    const supabase = await createAdminClient()
 
     const { data: log, error: fetchError } = await supabase
       .from('activity_logs')

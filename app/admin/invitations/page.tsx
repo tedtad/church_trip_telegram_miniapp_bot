@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Copy, Download, Plus, RotateCw, Trash2 } from 'lucide-react';
+import { Copy, Download, Plus, RotateCw, Share2, Trash2 } from 'lucide-react';
 
 type InvitationTargetType = 'booking' | 'charity';
 type InvitationTargetMode = 'public' | 'single' | 'bulk';
@@ -78,6 +78,16 @@ function toNumberOrNull(value: string) {
   if (!text) return null;
   const numeric = Number(text);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function buildInvitationShareText(invitation: Invitation) {
+  const targetType =
+    String(invitation.target || '').toLowerCase() === 'charity' ? 'charity campaign' : 'trip booking';
+  const title =
+    targetType === 'charity campaign'
+      ? invitation.campaign?.name || 'Charity Campaign'
+      : invitation.trip?.name || 'Trip';
+  return `Join via invitation (${invitation.invitation_code}) for ${title} (${targetType}).`;
 }
 
 export default function InvitationsPage() {
@@ -239,6 +249,32 @@ export default function InvitationsPage() {
     link.href = qrData;
     link.download = `invitation-${code}.png`;
     link.click();
+  }
+
+  function resolveInvitationLink(invitation: Invitation) {
+    const explicit = String(invitation.qr_code_url || '').trim();
+    if (explicit) return explicit;
+    if (typeof window === 'undefined') return '';
+    return `${window.location.origin}/invite/${encodeURIComponent(invitation.invitation_code)}`;
+  }
+
+  function shareInvitation(invitation: Invitation, channel: 'telegram' | 'whatsapp' | 'x' | 'facebook') {
+    const inviteUrl = resolveInvitationLink(invitation);
+    if (!inviteUrl) return;
+    const message = buildInvitationShareText(invitation);
+    const encodedUrl = encodeURIComponent(inviteUrl);
+    const encodedMessage = encodeURIComponent(message);
+
+    const shareUrl =
+      channel === 'telegram'
+        ? `https://t.me/share/url?url=${encodedUrl}&text=${encodedMessage}`
+        : channel === 'whatsapp'
+          ? `https://wa.me/?text=${encodeURIComponent(`${message} ${inviteUrl}`)}`
+          : channel === 'x'
+            ? `https://x.com/intent/tweet?url=${encodedUrl}&text=${encodedMessage}`
+            : `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`;
+
+    window.open(shareUrl, '_blank', 'noopener,noreferrer');
   }
 
   return (
@@ -484,6 +520,25 @@ export default function InvitationsPage() {
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button size="sm" variant="outline" onClick={() => shareInvitation(invitation, 'telegram')}>
+                        <Share2 className="w-4 h-4 mr-1" />
+                        Telegram
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => shareInvitation(invitation, 'whatsapp')}>
+                        <Share2 className="w-4 h-4 mr-1" />
+                        WhatsApp
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => shareInvitation(invitation, 'x')}>
+                        <Share2 className="w-4 h-4 mr-1" />
+                        X
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => shareInvitation(invitation, 'facebook')}>
+                        <Share2 className="w-4 h-4 mr-1" />
+                        Facebook
+                      </Button>
                     </div>
 
                     <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">

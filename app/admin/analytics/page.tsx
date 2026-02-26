@@ -8,6 +8,8 @@ type AnalyticsPayload = {
   summary?: {
     totalUsers: number;
     totalTickets: number;
+    activeTickets: number;
+    soldTickets: number;
     pendingTickets: number;
     confirmedTickets: number;
     cancelledTickets: number;
@@ -75,8 +77,8 @@ export default function AnalyticsPage() {
               <p className="text-2xl font-bold text-white">{summary.totalRevenue.toLocaleString()} ETB</p>
             </Card>
             <Card className="bg-slate-800 border-slate-700 p-5">
-              <p className="text-slate-400 text-sm">Confirmed Tickets</p>
-              <p className="text-2xl font-bold text-white">{summary.confirmedTickets}</p>
+              <p className="text-slate-400 text-sm">Sold Tickets</p>
+              <p className="text-2xl font-bold text-white">{summary.soldTickets}</p>
             </Card>
             <Card className="bg-slate-800 border-slate-700 p-5">
               <p className="text-slate-400 text-sm">Pending Approvals</p>
@@ -91,6 +93,14 @@ export default function AnalyticsPage() {
                 <div className="flex justify-between text-slate-300">
                   <span>Total</span>
                   <span>{summary.totalTickets}</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Active (excluding cancelled)</span>
+                  <span>{summary.activeTickets}</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Sold (confirmed + used)</span>
+                  <span>{summary.soldTickets}</span>
                 </div>
                 <div className="flex justify-between text-slate-300">
                   <span>Pending</span>

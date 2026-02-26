@@ -191,7 +191,7 @@ export default function AdminLayout({
               rel="noreferrer"
               className="mb-2 block text-xs text-cyan-300 hover:text-cyan-200"
             >
-              Developed by @Teddy
+              Developed by @tedtad
             </a>
           ) : null}
           <Button

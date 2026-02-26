@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { generateTicketQRCode } from '@/lib/qr-code';
+import { formatLocalizedDateTime } from '@/lib/date-localization';
 
 type TicketRecord = {
   id: string;
@@ -39,11 +40,8 @@ function escapeXml(input: string) {
     .replace(/'/g, '&apos;');
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString('en-US');
+function formatDate(value?: string | null, lang: 'en' | 'am' = 'en') {
+  return formatLocalizedDateTime(value, lang, 'N/A');
 }
 
 function isExpiredTicket(departureDate?: string | null) {
@@ -146,6 +144,7 @@ export async function GET(
   try {
     const { ticketId } = await Promise.resolve(context.params);
     const serial = request.nextUrl.searchParams.get('serial') || '';
+    const lang = String(request.nextUrl.searchParams.get('lang') || 'en').toLowerCase() === 'am' ? 'am' : 'en';
 
     if (!ticketId || !serial) {
       return NextResponse.json({ ok: false, error: 'ticketId and serial are required' }, { status: 400 });
@@ -181,8 +180,8 @@ export async function GET(
     const reference = escapeXml(receipt?.reference_number || 'N/A');
     const ticketNumber = escapeXml(ticket.ticket_number || 'N/A');
     const serialNumber = escapeXml(ticket.serial_number || 'N/A');
-    const issueDate = escapeXml(formatDate(ticket.issued_at || ticket.created_at));
-    const departureDate = escapeXml(formatDate(trip?.departure_date));
+    const issueDate = escapeXml(formatDate(ticket.issued_at || ticket.created_at, lang));
+    const departureDate = escapeXml(formatDate(trip?.departure_date, lang));
     const expired = isExpiredTicket(trip?.departure_date);
     const status = escapeXml(expired ? 'EXPIRED' : String(ticket.ticket_status || 'pending').toUpperCase());
     const statusColor = expired ? '#ef4444' : '#22c55e';

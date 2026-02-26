@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 
 type TicketRow = {
   ticket_status?: string | null;
@@ -7,9 +8,17 @@ type TicketRow = {
   trips?: { name?: string | null; destination?: string | null } | Array<{ name?: string | null; destination?: string | null }>;
 };
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createAdminClient();
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'analytics_view',
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
 
     const [
       { count: totalUsers },
@@ -26,7 +35,7 @@ export async function GET() {
       supabase.from('tickets').select('*', { count: 'exact', head: true }),
       supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('ticket_status', 'pending'),
       supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('ticket_status', 'confirmed'),
-      supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('ticket_status', 'cancelled'),
+      supabase.from('tickets').select('*', { count: 'exact', head: true }).in('ticket_status', ['cancelled', 'canceled']),
       supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('ticket_status', 'used'),
       supabase.from('receipts').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending'),
       supabase
@@ -44,6 +53,12 @@ export async function GET() {
 
     const approvedList = approvedReceipts || [];
     const totalRevenue = approvedList.reduce((sum: number, row: any) => sum + Number(row.amount_paid || 0), 0);
+    const normalizedTotalTickets = Number(totalTickets || 0);
+    const normalizedCancelledTickets = Number(cancelledTickets || 0);
+    const normalizedConfirmedTickets = Number(confirmedTickets || 0);
+    const normalizedUsedTickets = Number(usedTickets || 0);
+    const soldTickets = normalizedConfirmedTickets + normalizedUsedTickets;
+    const activeTickets = Math.max(0, normalizedTotalTickets - normalizedCancelledTickets);
 
     const dailyMap = new Map<string, number>();
     for (const row of approvedList) {
@@ -80,11 +95,13 @@ export async function GET() {
       ok: true,
       summary: {
         totalUsers: totalUsers || 0,
-        totalTickets: totalTickets || 0,
+        totalTickets: normalizedTotalTickets,
+        activeTickets,
+        soldTickets,
         pendingTickets: pendingTickets || 0,
-        confirmedTickets: confirmedTickets || 0,
-        cancelledTickets: cancelledTickets || 0,
-        usedTickets: usedTickets || 0,
+        confirmedTickets: normalizedConfirmedTickets,
+        cancelledTickets: normalizedCancelledTickets,
+        usedTickets: normalizedUsedTickets,
         pendingApprovals: pendingApprovals || 0,
         totalRevenue,
       },

@@ -40,6 +40,13 @@ function resolveInitData(request: NextRequest) {
   ).trim();
 }
 
+function isMissingRelation(error: unknown, relationName: string) {
+  const message = String((error as any)?.message || '').toLowerCase();
+  const code = String((error as any)?.code || '').toUpperCase();
+  if (code === '42P01') return true;
+  return message.includes('does not exist') && message.includes(relationName.toLowerCase());
+}
+
 export async function GET(request: NextRequest) {
   try {
     const appBaseUrl = resolveAppBaseUrl(APP_URL, request.nextUrl.origin);
@@ -72,6 +79,7 @@ export async function GET(request: NextRequest) {
       `
       )
       .eq('telegram_user_id', auth.user.id)
+      .not('ticket_status', 'in', '(cancelled,canceled)')
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -79,11 +87,41 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Failed to load bookings' }, { status: 500 });
     }
 
+    const ticketIds = (data || [])
+      .map((ticket: any) => String(ticket?.id || '').trim())
+      .filter(Boolean);
+    const ratingsByTicketId = new Map<
+      string,
+      { rating: number; comment: string | null; updatedAt: string | null }
+    >();
+
+    if (ticketIds.length > 0) {
+      const { data: ratings, error: ratingsError } = await client
+        .from('trip_ratings')
+        .select('ticket_id, rating, comment, updated_at')
+        .eq('telegram_user_id', auth.user.id)
+        .in('ticket_id', ticketIds);
+      if (!ratingsError) {
+        for (const row of ratings || []) {
+          const key = String((row as any)?.ticket_id || '').trim();
+          if (!key) continue;
+          ratingsByTicketId.set(key, {
+            rating: Number((row as any)?.rating || 0),
+            comment: (row as any)?.comment ? String((row as any).comment) : null,
+            updatedAt: (row as any)?.updated_at ? String((row as any).updated_at) : null,
+          });
+        }
+      } else if (!isMissingRelation(ratingsError, 'trip_ratings')) {
+        console.error('[miniapp-bookings] ratings load error:', ratingsError);
+      }
+    }
+
     const bookings = (data || []).map((ticket: any) => {
       const trip = Array.isArray(ticket.trips) ? ticket.trips[0] : ticket.trips;
       const receipt = Array.isArray(ticket.receipts) ? ticket.receipts[0] : ticket.receipts;
       const normalizedStatus = String(ticket.ticket_status || '').toLowerCase();
       const hasDigitalCard = ['confirmed', 'used'].includes(normalizedStatus);
+      const rating = ratingsByTicketId.get(String(ticket.id || '').trim()) || null;
 
       return {
         id: ticket.id,
@@ -96,6 +134,8 @@ export async function GET(request: NextRequest) {
         departureDate: trip?.departure_date || null,
         referenceNumber: receipt?.reference_number || null,
         approvalStatus: receipt?.approval_status || null,
+        canRate: normalizedStatus === 'used',
+        rating,
         cardUrl:
           appBaseUrl && hasDigitalCard
             ? `${appBaseUrl}/api/tickets/${ticket.id}/card?serial=${encodeURIComponent(ticket.serial_number || '')}`

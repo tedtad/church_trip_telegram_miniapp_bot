@@ -129,9 +129,10 @@ async function insertExecutionWithFallback(supabase: any, payload: Record<string
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await Promise.resolve(context.params);
     const supabase = await createAdminClient();
     const appSettings = await getMiniAppRuntimeSettings(supabase);
     if (appSettings.maintenanceMode) {
@@ -151,7 +152,7 @@ export async function POST(
       return NextResponse.json({ ok: false, message: 'Unauthorized mini app session' }, { status: 401 });
     }
 
-    const promiseId = String(params?.id || '').trim();
+    const promiseId = String(id || '').trim();
     if (!promiseId) {
       return NextResponse.json({ ok: false, message: 'Promise id is required' }, { status: 400 });
     }

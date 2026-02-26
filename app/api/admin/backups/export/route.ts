@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { exportTableAsCSV, exportMultipleTablesAsCSV } from '@/lib/backup'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdminPermission } from '@/lib/admin-rbac'
 
 /**
  * GET /api/admin/backups/export - Export data as CSV
@@ -10,6 +12,16 @@ import { exportTableAsCSV, exportMultipleTablesAsCSV } from '@/lib/backup'
  */
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'backups_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+    }
+
     const table = request.nextUrl.searchParams.get('table') || 'all'
     const format = request.nextUrl.searchParams.get('format') || 'csv'
     const all = request.nextUrl.searchParams.get('all') === 'true'

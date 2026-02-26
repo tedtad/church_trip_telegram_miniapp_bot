@@ -119,6 +119,9 @@ importers:
       embla-carousel-react:
         specifier: 8.6.0
         version: 8.6.0(react@19.2.4)
+      ethiopian-calendar-date-converter:
+        specifier: ^2.1.6
+        version: 2.1.6
       input-otp:
         specifier: 1.4.2
         version: 1.4.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -1444,6 +1447,9 @@ packages:
   escalade@3.2.0:
     resolution: {integrity: sha512-WUj2qlxaQtO4g6Pq5c29GTcWGDyd8itL8zTlipgECz3JesAiiOKotd8JU6otB3PACgG6xkJUyVhboMS+bje/jA==}
     engines: {node: '>=6'}
+
+  ethiopian-calendar-date-converter@2.1.6:
+    resolution: {integrity: sha512-qqOPkFQlMfLXF4gP70+2z6DrJNvKKcj+VIC37e72A5qs/LXCYQVt8egahDUfGkI0s92FyV7lfSUtGrX4rdM+3w==}
 
   eventemitter3@4.0.7:
     resolution: {integrity: sha512-8guHBZCwKnFhYdHr2ysuRWErTwhoN2X8XELRlrRwpmfeY2jjuUN4taQMsULKUVo1K4DvZl+0pgfyoysHxvmvEw==}
@@ -3088,6 +3094,8 @@ snapshots:
       tapable: 2.3.0
 
   escalade@3.2.0: {}
+
+  ethiopian-calendar-date-converter@2.1.6: {}
 
   eventemitter3@4.0.7: {}
 

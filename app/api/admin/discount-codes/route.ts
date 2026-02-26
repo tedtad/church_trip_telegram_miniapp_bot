@@ -1,9 +1,18 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdminPermission } from '@/lib/admin-rbac'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'discounts_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
+    }
 
     const { data, error } = await supabase
       .from('invitations')
@@ -35,7 +44,15 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'discounts_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
+    }
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
@@ -69,7 +86,15 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'discounts_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
+    }
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 

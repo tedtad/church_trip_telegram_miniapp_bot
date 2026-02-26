@@ -36,9 +36,9 @@ function isBookableStatus(status: string | null | undefined): boolean {
 
 async function queryTripsWithFallback(client: any) {
   const selectCandidates = [
-    'id, name, description, destination, departure_date, arrival_date, price_per_ticket, available_seats, total_seats, status, trip_status, image_url, trip_image_url, cover_image_url, bank_accounts, telebirr_manual_account_name, telebirr_manual_account_number, manual_payment_note, allow_gnpl, telegram_group_url, telegram_group_chat_id',
-    'id, name, description, destination, departure_date, arrival_date, price_per_ticket, available_seats, total_seats, status, trip_status',
+    'id, name, description, destination, departure_date, arrival_date, price_per_ticket, available_seats, total_seats, status, trip_status, image_url, trip_image_url, cover_image_url, bank_accounts, telebirr_manual_account_name, telebirr_manual_account_number, manual_payment_note, allow_gnpl, allow_discount, discount_enabled, enable_discount, has_discount, telegram_group_url, telegram_group_chat_id',
     '*',
+    'id, name, description, destination, departure_date, arrival_date, price_per_ticket, available_seats, total_seats, status, trip_status',
   ];
 
   let lastError: any = null;

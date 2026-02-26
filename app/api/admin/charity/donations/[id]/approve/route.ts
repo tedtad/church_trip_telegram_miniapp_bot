@@ -1,5 +1,6 @@
-import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAdminPermission } from '@/lib/admin-rbac';
 import { sendCharityDonationThankYou } from '@/lib/charity-automation';
 
 function isMissingColumn(error: unknown, columnName: string) {
@@ -63,18 +64,20 @@ async function updateExecutionApprovalWithFallback(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await createClient();
-  const body = await request.json();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const supabase = await createAdminClient();
+  const auth = await requireAdminPermission({
+    supabase,
+    request,
+    permission: 'charity_manage',
+  });
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
+
+  const { id } = await Promise.resolve(context.params);
+  const body = await request.json();
 
   const notes = String(body?.notes || '').trim();
 
@@ -82,11 +85,11 @@ export async function POST(
     .from('charity_donations')
     .update({
       approval_status: 'approved',
-      approved_by: user.id,
+      approved_by: auth.actor.id,
       approved_at: new Date().toISOString(),
       approval_notes: notes,
     })
-    .eq('id', params.id)
+    .eq('id', id)
     .select()
     .single();
 
@@ -121,7 +124,7 @@ export async function POST(
       const { data: executionRow } = await supabase
         .from('charity_promise_executions')
         .select('id')
-        .eq('donation_id', params.id)
+        .eq('donation_id', id)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -130,12 +133,12 @@ export async function POST(
 
     if (executionId) {
       await updateExecutionApprovalWithFallback(supabase, executionId, {
-        approvedBy: user.id,
+        approvedBy: auth.actor.id,
         notes,
       });
     }
   }
 
-  await sendCharityDonationThankYou(supabase, params.id, 'approved');
+  await sendCharityDonationThankYou(supabase, id, 'approved');
   return NextResponse.json({ donation: data });
 }

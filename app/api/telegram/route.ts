@@ -13,6 +13,7 @@ import {
 } from '@/lib/telegram';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { formatBankAccounts, getTripManualPaymentConfig } from '@/lib/payment-config';
+import { formatLocalizedDateTime } from '@/lib/date-localization';
 import {
   ONBOARDING_MAX_ATTEMPTS,
   verifyOnboardingOtp,
@@ -716,10 +717,7 @@ async function ensureUserChannel(userId: number, username?: string) {
 
 function formatDate(dateValue: string | null | undefined, lang: Lang) {
   const txt = i18n[lang];
-  if (!dateValue) return txt.notAvailable;
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return txt.notAvailable;
-  return date.toLocaleString(lang === 'am' ? 'am-ET' : 'en-US');
+  return formatLocalizedDateTime(dateValue, lang, txt.notAvailable);
 }
 
 function isTripExpired(dateValue?: string | null) {

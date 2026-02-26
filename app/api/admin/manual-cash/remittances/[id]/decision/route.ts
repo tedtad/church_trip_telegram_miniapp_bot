@@ -28,9 +28,10 @@ async function updateDecisionWithFallback(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await Promise.resolve(context.params);
     const supabase = await createAdminClient();
     const auth = await requireAdminPermission({
       supabase,
@@ -47,7 +48,7 @@ export async function POST(
       return NextResponse.json({ ok: false, error: 'Only designated approver role can review remittance' }, { status: 403 });
     }
 
-    const remittanceId = String(params?.id || '').trim();
+    const remittanceId = String(id || '').trim();
     if (!remittanceId) {
       return NextResponse.json({ ok: false, error: 'Remittance id is required' }, { status: 400 });
     }

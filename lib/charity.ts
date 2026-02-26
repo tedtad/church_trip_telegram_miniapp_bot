@@ -51,7 +51,7 @@ export interface ThankYouCard {
 }
 
 export async function getActiveCampaigns() {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('charity_campaigns')
@@ -68,7 +68,7 @@ export async function getActiveCampaigns() {
 }
 
 export async function getCampaignById(id: string) {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('charity_campaigns')
@@ -85,7 +85,7 @@ export async function getCampaignById(id: string) {
 }
 
 export async function createDonation(donation: Omit<CharityDonation, 'id' | 'created_at' | 'updated_at'>) {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('charity_donations')
@@ -102,7 +102,7 @@ export async function createDonation(donation: Omit<CharityDonation, 'id' | 'cre
 }
 
 export async function getDonationsByUser(telegramUserId: bigint) {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('charity_donations')
@@ -123,7 +123,7 @@ export async function approveDonation(
   adminId: string,
   notes: string
 ) {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('charity_donations')
@@ -150,7 +150,7 @@ export async function rejectDonation(
   adminId: string,
   reason: string
 ) {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('charity_donations')
@@ -173,7 +173,7 @@ export async function rejectDonation(
 }
 
 export async function getCampaignStats(campaignId: string) {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('charity_donations')
@@ -186,14 +186,16 @@ export async function getCampaignStats(campaignId: string) {
     return { totalDonations: 0, totalAmount: 0, donorCount: 0 }
   }
 
-  const totalAmount = data?.reduce((sum, d) => sum + d.donation_amount, 0) || 0
+  const totalAmount =
+    data?.reduce((sum: number, donation: { donation_amount: number }) => sum + Number(donation.donation_amount || 0), 0) ||
+    0
   const totalDonations = data?.length || 0
 
   return { totalDonations, totalAmount, donorCount: totalDonations }
 }
 
 export async function generateThankYouCard(donationId: string) {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   // Get donation details
   const { data: donation, error: donationError } = await supabase

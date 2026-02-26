@@ -1,11 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { backupDatabase } from '@/lib/backup'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdminPermission } from '@/lib/admin-rbac'
 
 /**
  * POST /api/admin/backups/create - Trigger manual backup
  */
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createAdminClient()
+    const auth = await requireAdminPermission({
+      supabase,
+      request,
+      permission: 'backups_manage',
+    })
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+    }
+
     console.log('[Backups Create API] Starting manual backup...')
     const backupResult = await backupDatabase()
 

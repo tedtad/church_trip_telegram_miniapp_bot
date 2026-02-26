@@ -47,6 +47,95 @@ const EMPTY_FORM: TripFormInput = {
   status: 'active',
 };
 
+const ALLOWED_DESCRIPTION_TAGS = new Set([
+  'h1',
+  'h2',
+  'h3',
+  'p',
+  'br',
+  'strong',
+  'em',
+  'u',
+  'ul',
+  'ol',
+  'li',
+  'a',
+]);
+
+function stripHtmlToText(value: string) {
+  return String(value || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sanitizeDescriptionHtml(value: string) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  if (typeof window === 'undefined') {
+    return stripHtmlToText(raw);
+  }
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${raw}</div>`, 'text/html');
+    const root = doc.body.firstElementChild as HTMLElement | null;
+    if (!root) return stripHtmlToText(raw);
+
+    const sanitizeNode = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) return;
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        node.parentNode?.removeChild(node);
+        return;
+      }
+
+      const element = node as HTMLElement;
+      const tagName = element.tagName.toLowerCase();
+      if (!ALLOWED_DESCRIPTION_TAGS.has(tagName)) {
+        const parent = element.parentNode;
+        if (!parent) {
+          element.replaceWith(doc.createTextNode(element.textContent || ''));
+          return;
+        }
+        while (element.firstChild) {
+          parent.insertBefore(element.firstChild, element);
+        }
+        parent.removeChild(element);
+        return;
+      }
+
+      for (const attr of Array.from(element.attributes)) {
+        const attrName = attr.name.toLowerCase();
+        if (tagName === 'a' && attrName === 'href') continue;
+        element.removeAttribute(attr.name);
+      }
+
+      if (tagName === 'a') {
+        const href = String(element.getAttribute('href') || '').trim();
+        if (!/^https?:\/\//i.test(href)) {
+          element.removeAttribute('href');
+        } else {
+          element.setAttribute('target', '_blank');
+          element.setAttribute('rel', 'noopener noreferrer');
+        }
+      }
+
+      for (const child of Array.from(element.childNodes)) {
+        sanitizeNode(child);
+      }
+    };
+
+    for (const child of Array.from(root.childNodes)) {
+      sanitizeNode(child);
+    }
+
+    return String(root.innerHTML || '').trim();
+  } catch {
+    return stripHtmlToText(raw);
+  }
+}
+
 function toDatetimeLocal(dateString?: string) {
   if (!dateString) return '';
   const date = new Date(dateString);
@@ -322,6 +411,10 @@ export default function TripsPage() {
 
     return next;
   }, [searchQuery, sortMode, statusFilter, trips]);
+  const descriptionPreviewHtml = useMemo(
+    () => sanitizeDescriptionHtml(formData.description || ''),
+    [formData.description]
+  );
 
   if (loading) {
     return (
@@ -401,6 +494,7 @@ export default function TripsPage() {
       <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6' : 'space-y-4'}>
         {filteredTrips.map((trip) => {
           const isExpanded = Boolean(expandedTripIds[trip.id]);
+          const sanitizedDescription = sanitizeDescriptionHtml(trip.description || '');
           return (
             <Card key={trip.id} className="bg-slate-800 border-slate-700 hover:border-slate-600 transition-all">
               {trip.image_url ? (
@@ -446,7 +540,14 @@ export default function TripsPage() {
 
                 {isExpanded ? (
                   <div className="space-y-2 text-sm mt-4 border-t border-slate-700 pt-4">
-                    <p className="text-slate-300">{trip.description || 'No description'}</p>
+                    {sanitizedDescription ? (
+                      <div
+                        className="text-slate-300 leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_a]:text-cyan-300 [&_a]:underline"
+                        dangerouslySetInnerHTML={{ __html: sanitizedDescription }}
+                      />
+                    ) : (
+                      <p className="text-slate-300">No description</p>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-slate-400">GNPL</span>
                       <span className="text-white font-medium">{(trip as any).allow_gnpl ? 'Enabled' : 'Disabled'}</span>
@@ -588,6 +689,19 @@ export default function TripsPage() {
                     rows={6}
                     placeholder="Trip details, meeting point, and notes."
                   />
+                  <div className="mt-3 rounded-md border border-slate-700 bg-slate-900/50 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-2">
+                      Description Preview
+                    </p>
+                    {descriptionPreviewHtml ? (
+                      <div
+                        className="text-sm text-slate-200 leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_a]:text-cyan-300 [&_a]:underline"
+                        dangerouslySetInnerHTML={{ __html: descriptionPreviewHtml }}
+                      />
+                    ) : (
+                      <p className="text-xs text-slate-400">No description preview yet.</p>
+                    )}
+                  </div>
                 </div>
 
                 <div>

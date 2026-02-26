@@ -3,6 +3,7 @@
 import Script from 'next/script';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import miniAppI18n from '@/lib/i18n/miniapp.json';
+import { formatLocalizedDateTime } from '@/lib/date-localization';
 
 type MiniAppUser = {
   id: number;
@@ -83,10 +84,7 @@ declare global {
 }
 
 function formatDate(value?: string | null, lang: UiLang = 'en', naText = 'N/A') {
-  if (!value) return naText;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return naText;
-  return date.toLocaleString(lang === 'am' ? 'am-ET' : 'en-US');
+  return formatLocalizedDateTime(value, lang, naText);
 }
 
 function readFileAsDataURL(file: File) {
