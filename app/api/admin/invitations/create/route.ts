@@ -221,8 +221,13 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('[v0] Error creating invitation:', error)
+    const rawMessage = String((error as any)?.message || '').trim()
+    const lower = rawMessage.toLowerCase()
+    const errorMessage = lower.includes('row-level security')
+      ? 'Database denied invitation creation. Ensure SUPABASE_SERVICE_ROLE_KEY is configured for admin APIs.'
+      : rawMessage || 'Failed to create invitation'
     return NextResponse.json(
-      { success: false, error: 'Failed to create invitation' },
+      { success: false, error: errorMessage },
       { status: 500 }
     )
   }

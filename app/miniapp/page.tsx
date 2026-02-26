@@ -1044,7 +1044,7 @@ export default function MiniAppPage() {
           <p className="text-xs tracking-[0.18em] uppercase text-amber-300">{displayAppName}</p>
           <h1 className="text-xl font-semibold">{t('page_title')}</h1>
           <p className="text-sm text-amber-100">{maintenanceMessage}</p>
-          <p className="text-xs text-slate-400">Developed by @Teddy</p>
+          <a href='https://t.me/tedtad' target='_blank' rel='noreferrer'><p className="text-xs text-slate-400">Developed by @Teddy</p></a>
         </section>
       </main>
     );

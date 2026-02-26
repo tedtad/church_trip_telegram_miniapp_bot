@@ -1,7 +1,11 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { normalizeAdminRole, requireAdminPermission } from '@/lib/admin-rbac';
+import {
+  ensureRoleExistsAndActive,
+  normalizeAdminRole,
+  requireAdminPermission,
+} from '@/lib/admin-rbac';
 import { writeAdminAuditLog } from '@/lib/admin-audit';
 import {
   ONBOARDING_MAX_ATTEMPTS,
@@ -401,6 +405,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const roleCheck = await ensureRoleExistsAndActive(supabase, payload.role);
+    if (!roleCheck.ok) {
+      return NextResponse.json({ ok: false, error: roleCheck.error }, { status: 400 });
+    }
+
     const passwordCheck = validateNewPassword(String(body?.temporary_password || 'StrongPass!234'));
     if (body?.temporary_password && passwordCheck) {
       return NextResponse.json({ ok: false, error: passwordCheck }, { status: 400 });
@@ -561,6 +570,13 @@ export async function PATCH(request: NextRequest) {
         { ok: false, error: 'Only system admins can assign system admin role' },
         { status: 403 }
       );
+    }
+
+    if ('role' in updatePayload) {
+      const roleCheck = await ensureRoleExistsAndActive(supabase, updatePayload.role);
+      if (!roleCheck.ok) {
+        return NextResponse.json({ ok: false, error: roleCheck.error }, { status: 400 });
+      }
     }
 
     if (id === auth.actor.id) {

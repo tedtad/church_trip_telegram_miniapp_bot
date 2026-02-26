@@ -20,6 +20,7 @@ export default function AdminLayout({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [adminName, setAdminName] = useState('');
   const [adminRole, setAdminRole] = useState('admin');
+  const [grantedPermissions, setGrantedPermissions] = useState<Set<AdminPermission> | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -33,13 +34,26 @@ export default function AdminLayout({
 
       if (!session) {
         setAuthenticated(false);
+        setGrantedPermissions(null);
         if (!pathname?.includes('/login')) {
           router.push('/admin/login');
         }
       } else {
+        const normalizedRole = normalizeAdminRole(session.admin.role);
         setAuthenticated(true);
         setAdminName(session.admin.name || session.admin.email);
-        setAdminRole(normalizeAdminRole(session.admin.role));
+        setAdminRole(normalizedRole);
+        try {
+          const response = await fetch('/api/admin/rbac', { cache: 'no-store' });
+          const json = await response.json().catch(() => ({}));
+          if (response.ok && json?.ok && Array.isArray(json?.me?.permissions)) {
+            setGrantedPermissions(new Set((json.me.permissions || []) as AdminPermission[]));
+          } else {
+            setGrantedPermissions(null);
+          }
+        } catch {
+          setGrantedPermissions(null);
+        }
       }
       setLoading(false);
     };
@@ -88,7 +102,9 @@ export default function AdminLayout({
     { icon: Shield, label: 'RBAC', href: '/admin/rbac', permission: 'admin_users_manage' },
     { icon: Settings, label: 'Settings', href: '/admin/settings', permission: 'settings_manage' },
   ];
-  const visibleNavItems = navItems.filter((item) => hasAdminPermission(adminRole, item.permission));
+  const hasPermission = (permission: AdminPermission) =>
+    grantedPermissions ? grantedPermissions.has(permission) : hasAdminPermission(adminRole, permission);
+  const visibleNavItems = navItems.filter((item) => hasPermission(item.permission));
   const routePermissions: Array<{ prefix: string; permission: AdminPermission }> = [
     { prefix: '/admin/dashboard', permission: 'dashboard_view' },
     { prefix: '/admin/tickets/manual-sale', permission: 'tickets_manual_sale' },
@@ -113,7 +129,7 @@ export default function AdminLayout({
   ];
   const currentRoutePermission =
     routePermissions.find((item) => pathname?.startsWith(item.prefix))?.permission || null;
-  const canAccessCurrentRoute = !currentRoutePermission || hasAdminPermission(adminRole, currentRoutePermission);
+  const canAccessCurrentRoute = !currentRoutePermission || hasPermission(currentRoutePermission);
   const fallbackRoute = visibleNavItems[0]?.href || '/admin/login';
 
   const handleLogout = async () => {

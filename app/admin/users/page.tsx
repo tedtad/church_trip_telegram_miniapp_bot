@@ -27,7 +27,7 @@ type OnboardingInfo = {
   email: string;
 };
 
-const ROLE_OPTIONS = ['system_admin', 'admin', 'moderator', 'analyst', 'sales_agent', 'user'];
+const FALLBACK_ROLE_OPTIONS = ['system_admin', 'admin', 'moderator', 'analyst', 'sales_agent', 'user'];
 
 export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
@@ -41,6 +41,7 @@ export default function AdminUsersPage() {
   const [newRole, setNewRole] = useState('moderator');
   const [newTwoFactorEnabled, setNewTwoFactorEnabled] = useState(true);
   const [onboardingInfo, setOnboardingInfo] = useState<OnboardingInfo | null>(null);
+  const [roleOptions, setRoleOptions] = useState<Array<{ code: string; name: string }>>([]);
 
   const headers = useMemo(
     () => ({
@@ -68,9 +69,41 @@ export default function AdminUsersPage() {
     }
   }, []);
 
+  const loadRoleOptions = useCallback(async () => {
+    try {
+      const response = await fetch('/api/admin/rbac', { cache: 'no-store' });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json?.ok) return;
+      const roles = Array.isArray(json?.roles) ? json.roles : [];
+      const mapped = roles
+        .filter((role: any) => role?.code && role?.is_active !== false)
+        .map((role: any) => ({
+          code: String(role.code),
+          name: String(role.name || role.code),
+        }));
+      if (mapped.length) {
+        setRoleOptions(mapped);
+      }
+    } catch {
+      // keep fallback roles
+    }
+  }, []);
+
   useEffect(() => {
     loadUsers();
-  }, [loadUsers]);
+    loadRoleOptions();
+  }, [loadRoleOptions, loadUsers]);
+
+  const availableRoleOptions = useMemo(() => {
+    if (roleOptions.length) return roleOptions;
+    return FALLBACK_ROLE_OPTIONS.map((code) => ({ code, name: code }));
+  }, [roleOptions]);
+
+  useEffect(() => {
+    if (!availableRoleOptions.find((role) => role.code === newRole)) {
+      setNewRole(availableRoleOptions[0]?.code || 'admin');
+    }
+  }, [availableRoleOptions, newRole]);
 
   const applyOnboarding = useCallback((payload: any, email: string) => {
     if (!payload?.message) return;
@@ -275,9 +308,9 @@ export default function AdminUsersPage() {
             onChange={(e) => setNewRole(e.target.value)}
             className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
           >
-            {ROLE_OPTIONS.map((role) => (
-              <option key={role} value={role}>
-                {role}
+            {availableRoleOptions.map((role) => (
+              <option key={role.code} value={role.code}>
+                {role.name}
               </option>
             ))}
           </select>
@@ -392,11 +425,14 @@ export default function AdminUsersPage() {
                       disabled={saving || !user.is_active}
                       className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded"
                     >
-                      {ROLE_OPTIONS.map((role) => (
-                        <option key={role} value={role}>
-                          {role}
+                      {availableRoleOptions.map((role) => (
+                        <option key={role.code} value={role.code}>
+                          {role.name}
                         </option>
                       ))}
+                      {!availableRoleOptions.find((role) => role.code === user.role) ? (
+                        <option value={user.role}>{user.role}</option>
+                      ) : null}
                     </select>
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-300">

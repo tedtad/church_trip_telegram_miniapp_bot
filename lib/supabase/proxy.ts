@@ -1,6 +1,10 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { hasAdminPermission, normalizeAdminRole, resolvePermissionForAdminApi } from '@/lib/admin-rbac'
+import {
+  hasAdminPermissionResolved,
+  normalizeAdminRole,
+  resolvePermissionForAdminApi,
+} from '@/lib/admin-rbac'
 import { enforceRequestRateLimit, extractClientIp } from '@/lib/request-rate-limit'
 
 const ADMIN_SESSION_COOKIE_NAME = 'th_admin_session'
@@ -235,7 +239,12 @@ async function updateSession(request: NextRequest) {
         )
       }
 
-      if (!hasAdminPermission(adminActor.role, requiredPermission)) {
+      const hasPermission = await hasAdminPermissionResolved({
+        supabase,
+        roleInput: adminActor.role,
+        permission: requiredPermission,
+      })
+      if (!hasPermission) {
         return NextResponse.json({ ok: false, error: 'Insufficient role permission.' }, { status: 403 })
       }
 

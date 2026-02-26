@@ -22,6 +22,8 @@ export default function InvitationsPage() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [language, setLanguage] = useState<'en' | 'am'>('en')
 
   const t = {
@@ -76,13 +78,17 @@ export default function InvitationsPage() {
   async function loadInvitations() {
     try {
       setLoading(true)
+      setError('')
       const res = await fetch('/api/admin/invitations')
+      const data = await res.json().catch(() => ({}))
       if (res.ok) {
-        const data = await res.json()
         setInvitations(data.invitations || [])
+      } else {
+        throw new Error(data?.error || 'Failed to load invitations')
       }
     } catch (error) {
       console.error('[v0] Error loading invitations:', error)
+      setError((error as Error)?.message || 'Failed to load invitations')
     } finally {
       setLoading(false)
     }
@@ -91,12 +97,22 @@ export default function InvitationsPage() {
   async function createInvitation() {
     try {
       setCreating(true)
-      const res = await fetch('/api/admin/invitations/create', { method: 'POST' })
-      if (res.ok) {
-        await loadInvitations()
+      setError('')
+      setNotice('')
+      const res = await fetch('/api/admin/invitations/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to create invitation')
       }
+      setNotice(`Invitation created: ${data?.invitation?.invitation_code || 'success'}`)
+      await loadInvitations()
     } catch (error) {
       console.error('[v0] Error creating invitation:', error)
+      setError((error as Error)?.message || 'Failed to create invitation')
     } finally {
       setCreating(false)
     }
@@ -110,14 +126,20 @@ export default function InvitationsPage() {
 
     try {
       setDeletingId(invitation.id)
+      setError('')
+      setNotice('')
       const res = await fetch(`/api/admin/invitations?id=${invitation.id}`, {
         method: 'DELETE',
       })
-      if (res.ok) {
-        await loadInvitations()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to delete invitation')
       }
+      setNotice(`Invitation deactivated: ${invitation.invitation_code}`)
+      await loadInvitations()
     } catch (error) {
       console.error('[v0] Error deleting invitation:', error)
+      setError((error as Error)?.message || 'Failed to delete invitation')
     } finally {
       setDeletingId(null)
     }
@@ -141,6 +163,8 @@ export default function InvitationsPage() {
         <div>
           <h1 className="text-3xl font-bold">{labels.title}</h1>
           <p className="text-muted-foreground mt-1">{labels.subtitle}</p>
+          {error ? <p className="text-sm text-red-500 mt-1">{error}</p> : null}
+          {notice ? <p className="text-sm text-emerald-500 mt-1">{notice}</p> : null}
         </div>
         <div className="flex gap-2">
           <Button

@@ -129,6 +129,7 @@ export function normalizeAdminRole(input: unknown): AdminRole {
   const alias = ROLE_ALIASES[raw];
   if (alias) return alias;
   if (raw in ROLE_PERMISSION_MAP) return raw as AdminRole;
+  if (/^[a-z0-9_:-]+$/.test(raw)) return raw as AdminRole;
   return 'admin';
 }
 
@@ -142,4 +143,3 @@ export function getAdminPermissionsForRole(roleInput: unknown): ReadonlyArray<Ad
   const role = normalizeAdminRole(roleInput);
   return ROLE_PERMISSION_MAP[role] || [];
 }
-
