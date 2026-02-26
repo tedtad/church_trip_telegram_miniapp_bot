@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Plus, Edit, Trash, X, Loader2, Search, LayoutGrid, List, ChevronDown, ChevronUp } from 'lucide-react';
@@ -70,6 +70,7 @@ export default function TripsPage() {
   const [sortMode, setSortMode] = useState<'departure_desc' | 'departure_asc' | 'price_desc' | 'price_asc' | 'name_asc'>('departure_desc');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [expandedTripIds, setExpandedTripIds] = useState<Record<string, boolean>>({});
+  const descriptionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     loadTrips();
@@ -143,6 +144,41 @@ export default function TripsPage() {
 
   const handleFormChange = <K extends keyof TripFormInput>(field: K, value: TripFormInput[K]) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const applyDescriptionMarkup = (before: string, after: string, placeholder = 'text') => {
+    const textarea = descriptionTextareaRef.current;
+    const currentText = formData.description || '';
+
+    if (!textarea) {
+      handleFormChange('description', `${currentText}${before}${placeholder}${after}`);
+      return;
+    }
+
+    const start = textarea.selectionStart ?? currentText.length;
+    const end = textarea.selectionEnd ?? currentText.length;
+    const selectedText = currentText.slice(start, end) || placeholder;
+    const nextText = `${currentText.slice(0, start)}${before}${selectedText}${after}${currentText.slice(end)}`;
+
+    handleFormChange('description', nextText);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const selectionStart = start + before.length;
+      const selectionEnd = selectionStart + selectedText.length;
+      textarea.setSelectionRange(selectionStart, selectionEnd);
+    });
+  };
+
+  const applyDescriptionBlock = (startTag: string, endTag: string, placeholder = 'text') => {
+    applyDescriptionMarkup(`${startTag}\n`, `\n${endTag}`, placeholder);
+  };
+
+  const applyDescriptionLink = () => {
+    const url = window.prompt('Enter URL (https://...)', 'https://');
+    if (!url) return;
+    const sanitizedUrl = url.trim();
+    if (!/^https?:\/\//i.test(sanitizedUrl)) return;
+    applyDescriptionMarkup(`<a href="${sanitizedUrl}" target="_blank" rel="noopener noreferrer">`, '</a>', 'link text');
   };
 
   const validateForm = () => {
@@ -493,11 +529,63 @@ export default function TripsPage() {
 
                 <div>
                   <label className="block text-sm font-medium text-slate-200 mb-2">Description</label>
+                  <div className="mb-2 flex flex-wrap gap-2 rounded-md border border-slate-600 bg-slate-900/60 p-2">
+                    <button
+                      type="button"
+                      onClick={() => applyDescriptionMarkup('<strong>', '</strong>', 'bold text')}
+                      className="rounded border border-slate-500 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                    >
+                      Bold
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyDescriptionMarkup('<em>', '</em>', 'italic text')}
+                      className="rounded border border-slate-500 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                    >
+                      Italic
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyDescriptionMarkup('<u>', '</u>', 'underlined text')}
+                      className="rounded border border-slate-500 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                    >
+                      Underline
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyDescriptionMarkup('<h2>', '</h2>', 'Heading')}
+                      className="rounded border border-slate-500 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                    >
+                      H2
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyDescriptionBlock('<ul><li>', '</li></ul>', 'List item')}
+                      className="rounded border border-slate-500 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                    >
+                      Bullet List
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyDescriptionBlock('<ol><li>', '</li></ol>', 'List item')}
+                      className="rounded border border-slate-500 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                    >
+                      Numbered List
+                    </button>
+                    <button
+                      type="button"
+                      onClick={applyDescriptionLink}
+                      className="rounded border border-slate-500 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                    >
+                      Link
+                    </button>
+                  </div>
                   <textarea
+                    ref={descriptionTextareaRef}
                     value={formData.description}
                     onChange={(e) => handleFormChange('description', e.target.value)}
                     className="w-full p-2 bg-slate-700 border border-slate-600 text-white rounded placeholder:text-slate-400 focus:outline-none focus:border-primary"
-                    rows={3}
+                    rows={6}
                     placeholder="Trip details, meeting point, and notes."
                   />
                 </div>

@@ -2,6 +2,8 @@ type RawSettings = Record<string, unknown>;
 
 export type MiniAppRuntimeSettings = {
   appName: string;
+  logoUrl: string;
+  logoFilename: string;
   maintenanceMode: boolean;
   maintenanceMessage: string;
   charityEnabled: boolean;
@@ -18,6 +20,8 @@ export type MiniAppRuntimeSettings = {
 
 const SETTINGS_FIELDS = [
   'app_name',
+  'logo_url',
+  'logo_filename',
   'maintenance_mode',
   'maintenance_message',
   'charity_enabled',
@@ -72,6 +76,8 @@ export async function getMiniAppRuntimeSettings(client: any): Promise<MiniAppRun
   const row = await loadRawMiniAppSettings(client);
   return {
     appName: String(row.app_name || 'TicketHub').trim() || 'TicketHub',
+    logoUrl: String(row.logo_url || '').trim(),
+    logoFilename: String(row.logo_filename || '').trim(),
     maintenanceMode: Boolean(row.maintenance_mode),
     maintenanceMessage: String(row.maintenance_message || '').trim(),
     charityEnabled: row.charity_enabled !== false,

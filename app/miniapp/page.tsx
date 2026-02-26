@@ -15,6 +15,8 @@ type MiniAppUser = {
 
 type MiniAppSettings = {
   appName?: string;
+  logoUrl?: string;
+  logoFilename?: string;
   maintenanceMode?: boolean;
   maintenanceMessage?: string;
   charityEnabled?: boolean;
@@ -136,6 +138,7 @@ type ReceiptValidationErrorKey =
 const MAX_RECEIPT_BYTES = 2 * 1024 * 1024;
 const ALLOWED_RECEIPT_MIME_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'application/pdf']);
 const ALLOWED_RECEIPT_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.pdf']);
+const MINIAPP_TRIP_DESCRIPTION_PREVIEW_LIMIT = 250;
 const I18N = miniAppI18n as Record<UiLang, Record<string, string>>;
 const AMHARIC_FONT_STACK = "'Noto Sans Ethiopic','Abyssinica SIL','Nyala','Segoe UI',sans-serif";
 
@@ -161,6 +164,13 @@ function normalizeDiscountCodeInput(value: string) {
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9_-]/g, '');
+}
+
+function stripHtmlToText(value: string) {
+  return String(value || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function splitNameParts(fullName: string) {
@@ -245,14 +255,17 @@ export default function MiniAppPage() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
   const [maintenanceMessage, setMaintenanceMessage] = useState('');
   const [showExpiredBookings, setShowExpiredBookings] = useState(false);
   const [methodByTrip, setMethodByTrip] = useState<Record<string, PaymentMethod>>({});
   const [quantityByTrip, setQuantityByTrip] = useState<Record<string, number>>({});
+  const [expandedTripDescriptions, setExpandedTripDescriptions] = useState<Record<string, boolean>>({});
   const [discountCodeByTrip, setDiscountCodeByTrip] = useState<Record<string, string>>({});
   const [pendingInviteCode, setPendingInviteCode] = useState('');
   const [pendingInviteTripId, setPendingInviteTripId] = useState('');
   const [manualFlow, setManualFlow] = useState<ManualFlow | null>(null);
+  const [manualSummaryOpen, setManualSummaryOpen] = useState(false);
   const [miniAppSettings, setMiniAppSettings] = useState<MiniAppSettings | null>(null);
   const [transferInputs, setTransferInputs] = useState<Record<string, { phone: string; name: string }>>({});
   const [transferBusyTicketId, setTransferBusyTicketId] = useState('');
@@ -267,8 +280,40 @@ export default function MiniAppPage() {
     () => String(miniAppSettings?.appName || '').trim() || t('app_title'),
     [miniAppSettings?.appName, t]
   );
+  const logoImageUrl = useMemo(() => String(miniAppSettings?.logoUrl || '').trim(), [miniAppSettings?.logoUrl]);
+  const logoLabel = useMemo(
+    () => String(miniAppSettings?.logoFilename || '').trim() || 'Logo placeholder',
+    [miniAppSettings?.logoFilename]
+  );
+  const appInitial = useMemo(() => {
+    const text = displayAppName.replace(/\s+/g, '').trim();
+    return text ? text[0]!.toUpperCase() : 'T';
+  }, [displayAppName]);
+  const charityHref = useMemo(() => {
+    if (!initData) return '/miniapp/charity';
+    return `/miniapp/charity?initData=${encodeURIComponent(initData)}`;
+  }, [initData]);
   const charityEnabled = miniAppSettings?.charityEnabled !== false;
   const discountEnabled = miniAppSettings?.discountEnabled !== false;
+  const hasFieldError = useCallback((key: string) => Boolean(fieldErrors[key]), [fieldErrors]);
+
+  const clearFieldError = useCallback((key: string) => {
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      return { ...prev, [key]: false };
+    });
+  }, []);
+
+  const setValidationError = useCallback((message: string, keys: string[] = []) => {
+    setNotice('');
+    setError(message);
+    if (!keys.length) return;
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      for (const key of keys) next[key] = true;
+      return next;
+    });
+  }, []);
 
   const selectedMethod = useCallback(
     (trip: Trip) => {
@@ -319,6 +364,8 @@ export default function MiniAppPage() {
           const sessionSettings = (sessionJson?.appSettings || {}) as MiniAppSettings;
           setMiniAppSettings({
             appName: String(sessionSettings?.appName || '').trim(),
+            logoUrl: String(sessionSettings?.logoUrl || '').trim(),
+            logoFilename: String(sessionSettings?.logoFilename || '').trim(),
             maintenanceMode: true,
             maintenanceMessage: String(sessionJson?.message || sessionSettings?.maintenanceMessage || '').trim(),
             charityEnabled: sessionSettings?.charityEnabled !== false,
@@ -353,6 +400,8 @@ export default function MiniAppPage() {
       setUiLang(sessionUser?.languageCode === 'en' ? 'en' : 'am');
       setMiniAppSettings({
         appName: String(sessionSettings?.appName || '').trim(),
+        logoUrl: String(sessionSettings?.logoUrl || '').trim(),
+        logoFilename: String(sessionSettings?.logoFilename || '').trim(),
         maintenanceMode: Boolean(sessionSettings?.maintenanceMode),
         maintenanceMessage: String(sessionSettings?.maintenanceMessage || '').trim(),
         charityEnabled: sessionSettings?.charityEnabled !== false,
@@ -438,13 +487,14 @@ export default function MiniAppPage() {
       setBusyTripId(tripId);
       setError('');
       setNotice('');
+      setFieldErrors({});
       try {
         if (!normalizedName) {
-          setError(t('error_customer_name_required'));
+          setValidationError(t('error_customer_name_required'), ['customerName']);
           return;
         }
         if (!/^\+?[0-9]{7,20}$/.test(normalizedPhone)) {
-          setError(t('error_phone_required'));
+          setValidationError(t('error_phone_required'), ['phoneNumber']);
           return;
         }
         if (paymentMethod === 'gnpl' && !gnplEnabledForTrip) {
@@ -452,7 +502,7 @@ export default function MiniAppPage() {
           return;
         }
         if (paymentMethod === 'gnpl' && !gnplIdCardDataUrl) {
-          setError(t('error_gnpl_id_scan_required'));
+          setValidationError(t('error_gnpl_id_scan_required'), ['gnplIdCard']);
           return;
         }
 
@@ -538,6 +588,7 @@ export default function MiniAppPage() {
             receiptFileName: '',
             receiptDataUrl: '',
           });
+          setManualSummaryOpen(false);
           const baseNotice = String(json.message || t('notice_manual_started'));
           setNotice(bookingGroupUrl ? `${baseNotice}\n${t('join_trip_group')}: ${bookingGroupUrl}` : baseNotice);
         } else {
@@ -592,11 +643,12 @@ export default function MiniAppPage() {
   const onManualReceiptFile = useCallback(async (file?: File | null) => {
     if (!file) {
       setManualFlow((prev) => (prev ? { ...prev, receiptFileName: '', receiptDataUrl: '' } : prev));
+      clearFieldError('manualReceipt');
       return;
     }
     const validationError = validateReceiptFile(file);
     if (validationError) {
-      setError(t(validationError));
+      setValidationError(t(validationError), ['manualReceipt']);
       setManualFlow((prev) => (prev ? { ...prev, receiptFileName: '', receiptDataUrl: '' } : prev));
       return;
     }
@@ -611,18 +663,20 @@ export default function MiniAppPage() {
         }
         : prev
     );
-  }, [t]);
+    clearFieldError('manualReceipt');
+  }, [clearFieldError, setValidationError, t]);
 
   const onGnplIdCardFile = useCallback(async (file?: File | null) => {
     if (!file) {
       setGnplIdCardFileName('');
       setGnplIdCardDataUrl('');
+      clearFieldError('gnplIdCard');
       return;
     }
 
     const validationError = validateGnplIdCardFile(file);
     if (validationError) {
-      setError(t(validationError));
+      setValidationError(t(validationError), ['gnplIdCard']);
       setGnplIdCardFileName('');
       setGnplIdCardDataUrl('');
       return;
@@ -631,21 +685,40 @@ export default function MiniAppPage() {
     const dataUrl = await readFileAsDataURL(file);
     setGnplIdCardFileName(file.name || `id_card_${Date.now()}`);
     setGnplIdCardDataUrl(dataUrl);
-  }, [t]);
+    clearFieldError('gnplIdCard');
+  }, [clearFieldError, setValidationError, t]);
 
   const submitManualPayment = useCallback(async () => {
     if (!manualFlow) return;
 
     setError('');
     setNotice('');
+    setFieldErrors((prev) => ({
+      ...prev,
+      manualReference: false,
+      manualReceiptLink: false,
+      manualReceipt: false,
+      manualAmountPaid: false,
+    }));
+
+    const amountPaidValue = Number(manualFlow.amountPaid || 0);
+    if (!Number.isFinite(amountPaidValue) || amountPaidValue <= 0) {
+      setValidationError(t('error_paid_amount_required'), ['manualAmountPaid']);
+      return;
+    }
+    const expectedAmount = Number((manualFlow.finalAmount || 0).toFixed(2));
+    if (amountPaidValue < expectedAmount) {
+      setValidationError('Paid amount cannot be lower than expected total.', ['manualAmountPaid']);
+      return;
+    }
 
     const hasReferenceOrLink = Boolean(manualFlow.referenceNumber.trim() || manualFlow.receiptLink.trim());
     if (!hasReferenceOrLink) {
-      setError(t('error_payment_reference_required'));
+      setValidationError(t('error_payment_reference_required'), ['manualReference', 'manualReceiptLink']);
       return;
     }
     if (!manualFlow.receiptDataUrl && !manualFlow.receiptLink.trim()) {
-      setError(t('error_receipt_required'));
+      setValidationError(t('error_receipt_required'), ['manualReceipt']);
       return;
     }
 
@@ -687,7 +760,7 @@ export default function MiniAppPage() {
     } finally {
       setManualSubmitting(false);
     }
-  }, [apiFetch, initData, loadData, manualFlow, t]);
+  }, [apiFetch, initData, loadData, manualFlow, setValidationError, t]);
 
   const submitGnplPayment = useCallback(
     async (account: GnplAccount) => {
@@ -851,6 +924,11 @@ export default function MiniAppPage() {
     return manualFlow.bankAccounts[idx] || null;
   }, [manualFlow]);
 
+  const selectedManualTrip = useMemo(() => {
+    if (!manualFlow) return null;
+    return trips.find((trip) => trip.id === manualFlow.tripId) || null;
+  }, [manualFlow, trips]);
+
   const changeLanguage = useCallback(
     async (nextLang: UiLang) => {
       if (!initData || languageSaving || nextLang === uiLang) return;
@@ -890,12 +968,13 @@ export default function MiniAppPage() {
       .trim()
       .replace(/\s+/g, ' ');
     const normalized = normalizePhoneInput(phoneNumber).trim();
+    setFieldErrors((prev) => ({ ...prev, customerName: false, phoneNumber: false }));
     if (!normalizedName) {
-      setError(t('error_customer_name_required'));
+      setValidationError(t('error_customer_name_required'), ['customerName']);
       return;
     }
     if (!/^\+?[0-9]{7,20}$/.test(normalized)) {
-      setError(t('error_phone_required'));
+      setValidationError(t('error_phone_required'), ['phoneNumber']);
       return;
     }
 
@@ -936,7 +1015,7 @@ export default function MiniAppPage() {
     } finally {
       setProfileSaving(false);
     }
-  }, [apiFetch, customerName, initData, phoneNumber, t]);
+  }, [apiFetch, customerName, initData, phoneNumber, setValidationError, t]);
 
   const copyText = useCallback(async (value: string) => {
     const text = String(value || '').trim();
@@ -1056,16 +1135,43 @@ export default function MiniAppPage() {
       style={uiLang === 'am' ? { fontFamily: AMHARIC_FONT_STACK } : undefined}
     >
       <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
+      <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex flex-col items-center gap-2 px-4">
+        {error ? (
+          <div className="w-full max-w-2xl rounded-xl border border-red-400 bg-red-500/90 px-4 py-3 text-sm font-medium text-white shadow-xl">
+            ❌ {error}
+          </div>
+        ) : null}
+        {notice ? (
+          <div className="w-full max-w-2xl rounded-xl border border-emerald-400 bg-emerald-500/90 px-4 py-3 text-sm font-medium text-white shadow-xl whitespace-pre-line">
+            ✅ {notice}
+          </div>
+        ) : null}
+      </div>
 
       <section className="max-w-3xl mx-auto space-y-4">
         <header className="rounded-2xl border border-cyan-700/40 bg-slate-900/70 p-4 shadow-xl">
+          <div className="mb-2 flex items-center gap-3 rounded-xl border border-slate-700/70 bg-slate-950/40 p-2">
+            <div className="h-11 w-11 overflow-hidden rounded-lg border border-slate-700/80 bg-slate-900/80">
+              {logoImageUrl ? (
+                <img src={logoImageUrl} alt={logoLabel} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-cyan-300">
+                  {appInitial}
+                </div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-100">{displayAppName}</p>
+              <p className="truncate text-xs text-slate-400">{logoLabel}</p>
+            </div>
+          </div>
           <p className="text-xs tracking-[0.18em] uppercase text-cyan-300">🎫 {displayAppName}</p>
           <h1 className="text-2xl font-semibold mt-1">✈️ {t('page_title')}</h1>
           {charityEnabled ? (
-            <div className="mt-4 flex gap-2">
+            <div className="mt-3">
               <a
-                href="/miniapp/charity"
-                className="flex-1 rounded-lg bg-gradient-to-r from-red-600 to-red-700 px-4 py-2 text-center text-sm font-medium hover:from-red-700 hover:to-red-800 transition-all"
+                href={charityHref}
+                className="inline-flex rounded-lg bg-gradient-to-r from-red-600 to-red-700 px-3 py-1.5 text-center text-xs font-medium hover:from-red-700 hover:to-red-800 transition-all"
               >
                 ❤️ {t('make_a_donation')}
               </a>
@@ -1092,9 +1198,14 @@ export default function MiniAppPage() {
                 <input
                   type="text"
                   value={customerName}
-                  onChange={(e) => setCustomerName(String(e.target.value || '').replace(/\s+/g, ' ').trimStart())}
+                  onChange={(e) => {
+                    clearFieldError('customerName');
+                    setCustomerName(String(e.target.value || '').replace(/\s+/g, ' ').trimStart());
+                  }}
                   placeholder={t('customer_name_placeholder')}
-                  className="rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-52"
+                  className={`rounded-md border bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-52 ${
+                    hasFieldError('customerName') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                  }`}
                 />
               </div>
 
@@ -1103,9 +1214,14 @@ export default function MiniAppPage() {
                 <input
                   type="tel"
                   value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(normalizePhoneInput(e.target.value))}
+                  onChange={(e) => {
+                    clearFieldError('phoneNumber');
+                    setPhoneNumber(normalizePhoneInput(e.target.value));
+                  }}
                   placeholder={t('phone_placeholder')}
-                  className="rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-48"
+                  className={`rounded-md border bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-48 ${
+                    hasFieldError('phoneNumber') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                  }`}
                 />
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -1120,7 +1236,9 @@ export default function MiniAppPage() {
                       setError(t('error_read_receipt_failed'));
                     }
                   }}
-                  className="rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-64"
+                  className={`rounded-md border bg-slate-950/70 px-2 py-1 text-xs text-slate-100 w-full sm:w-64 ${
+                    hasFieldError('gnplIdCard') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                  }`}
                 />
               </div>
               {gnplIdCardFileName ? (
@@ -1162,17 +1280,6 @@ export default function MiniAppPage() {
           ) : null}
         </header>
 
-        {error ? (
-          <div className="rounded-xl border border-red-300 bg-red-100 p-3 text-sm text-red-900 font-medium">
-            ❌ {error}
-          </div>
-        ) : null}
-        {notice ? (
-          <div className="rounded-xl border border-emerald-300 bg-emerald-100 p-3 text-sm text-emerald-900 font-medium whitespace-pre-line">
-            ✅ {notice}
-          </div>
-        ) : null}
-
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-medium">🚌 {t('available_trips')}</h2>
           <button
@@ -1204,6 +1311,13 @@ export default function MiniAppPage() {
               const method = selectedMethod(trip);
               const quantity = selectedQuantity(trip.id);
               const isBusy = busyTripId === trip.id;
+              const description = stripHtmlToText(trip.description || '');
+              const isDescriptionLong = description.length > MINIAPP_TRIP_DESCRIPTION_PREVIEW_LIMIT;
+              const isDescriptionExpanded = Boolean(expandedTripDescriptions[trip.id]);
+              const visibleDescription =
+                isDescriptionLong && !isDescriptionExpanded
+                  ? `${description.slice(0, MINIAPP_TRIP_DESCRIPTION_PREVIEW_LIMIT).trimEnd()}...`
+                  : description;
               return (
                 <article key={trip.id} className="rounded-2xl border border-slate-700/70 bg-slate-900/65 overflow-hidden">
                   {image ? <img src={image} alt={trip.name || t('trip_fallback')} className="h-36 w-full object-cover" /> : null}
@@ -1221,8 +1335,24 @@ export default function MiniAppPage() {
                       💰 ETB {Number(trip.price_per_ticket || 0).toFixed(2)} | 💺 {t('seats')} {trip.available_seats ?? 0}/
                       {trip.total_seats ?? 0}
                     </p>
-                    {trip.description ? (
-                      <p className="text-xs text-slate-300 leading-relaxed">{trip.description}</p>
+                    {description ? (
+                      <div className="space-y-1">
+                        <p className="text-xs text-slate-300 leading-relaxed">{visibleDescription}</p>
+                        {isDescriptionLong ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedTripDescriptions((prev) => ({
+                                ...prev,
+                                [trip.id]: !prev[trip.id],
+                              }))
+                            }
+                            className="text-[11px] text-cyan-300 hover:text-cyan-200 underline"
+                          >
+                            {isDescriptionExpanded ? 'Less' : 'More'}
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
                     {trip.telegram_group_url ? (
                       <div>
@@ -1306,6 +1436,23 @@ export default function MiniAppPage() {
               💳 {t('manual_payment')} - {manualFlow.tripName}
             </h2>
             <p className="text-sm text-slate-300">📋 {t('manual_step_desc')}</p>
+            <button
+              type="button"
+              onClick={() => setManualSummaryOpen((prev) => !prev)}
+              className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 hover:bg-slate-800/60"
+            >
+              {manualSummaryOpen ? 'Hide booking summary' : 'Show booking summary'}
+            </button>
+            {manualSummaryOpen ? (
+              <div className="rounded-lg border border-slate-700/70 bg-slate-950/50 p-3 text-xs text-slate-300 space-y-1">
+                <p>Trip: {manualFlow.tripName}</p>
+                <p>Customer: {String(customerName || '-')}</p>
+                <p>Phone: {String(phoneNumber || '-')}</p>
+                {selectedManualTrip?.description ? (
+                  <p className="text-slate-400">{selectedManualTrip.description}</p>
+                ) : null}
+              </div>
+            ) : null}
 
             {manualFlow.paymentMethod === 'bank' ? (
               <div className="rounded-lg border border-slate-700/70 bg-slate-950/50 p-3 space-y-2">
@@ -1415,10 +1562,13 @@ export default function MiniAppPage() {
                   step="0.01"
                   min="0"
                   value={manualFlow.amountPaid}
-                  onChange={(e) =>
-                    setManualFlow((prev) => (prev ? { ...prev, amountPaid: e.target.value } : prev))
-                  }
-                  className="mt-1 w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
+                  onChange={(e) => {
+                    clearFieldError('manualAmountPaid');
+                    setManualFlow((prev) => (prev ? { ...prev, amountPaid: e.target.value } : prev));
+                  }}
+                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${
+                    hasFieldError('manualAmountPaid') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                  }`}
                 />
               </label>
 
@@ -1427,10 +1577,13 @@ export default function MiniAppPage() {
                 <input
                   type="text"
                   value={manualFlow.referenceNumber}
-                  onChange={(e) =>
-                    setManualFlow((prev) => (prev ? { ...prev, referenceNumber: e.target.value } : prev))
-                  }
-                  className="mt-1 w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
+                  onChange={(e) => {
+                    clearFieldError('manualReference');
+                    setManualFlow((prev) => (prev ? { ...prev, referenceNumber: e.target.value } : prev));
+                  }}
+                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${
+                    hasFieldError('manualReference') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                  }`}
                   placeholder={t('ref_placeholder')}
                 />
               </label>
@@ -1440,10 +1593,16 @@ export default function MiniAppPage() {
                 <input
                   type="url"
                   value={manualFlow.receiptLink}
-                  onChange={(e) =>
-                    setManualFlow((prev) => (prev ? { ...prev, receiptLink: e.target.value } : prev))
-                  }
-                  className="mt-1 w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
+                  onChange={(e) => {
+                    clearFieldError('manualReceiptLink');
+                    clearFieldError('manualReceipt');
+                    setManualFlow((prev) => (prev ? { ...prev, receiptLink: e.target.value } : prev));
+                  }}
+                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${
+                    hasFieldError('manualReceiptLink') || hasFieldError('manualReceipt')
+                      ? 'border-red-500 ring-1 ring-red-500'
+                      : 'border-slate-700'
+                  }`}
                   placeholder="https://.../receipt?ref=TX123&date=2026-02-25"
                 />
               </label>
@@ -1472,7 +1631,9 @@ export default function MiniAppPage() {
                       setError(t('error_read_receipt_failed'));
                     }
                   }}
-                  className="mt-1 w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm"
+                  className={`mt-1 w-full rounded-lg bg-slate-950/70 border px-3 py-2 text-sm ${
+                    hasFieldError('manualReceipt') ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700'
+                  }`}
                 />
               </label>
             </div>
@@ -1701,3 +1862,4 @@ export default function MiniAppPage() {
     </main>
   );
 }
+

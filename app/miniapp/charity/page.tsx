@@ -98,9 +98,12 @@ const COPY: Record<Lang, Record<string, string>> = {
 };
 
 function resolveInitDataFromPage() {
+  const tg = window.Telegram?.WebApp;
+  tg?.ready?.();
+  tg?.expand?.();
   const params = new URLSearchParams(window.location.search);
   const fromQuery = String(params.get('initData') || params.get('tgWebAppData') || '').trim();
-  const fromTg = String(window.Telegram?.WebApp?.initData || '').trim();
+  const fromTg = String(tg?.initData || '').trim();
   return fromTg || fromQuery;
 }
 
@@ -222,8 +225,9 @@ export default function CharityPage() {
   }, []);
 
   useEffect(() => {
-    const resolved = resolveInitDataFromPage();
-    setInitData(resolved);
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
     const params = new URLSearchParams(window.location.search);
     setInvitationCode(
       normalizeDiscountCodeInput(
@@ -241,15 +245,39 @@ export default function CharityPage() {
       setLang(String(tgUser.language_code || '').toLowerCase() === 'en' ? 'en' : 'am');
     }
 
-    (async () => {
-      const allowed = await ensureMiniAppCharityAccess(resolved);
-      if (!allowed) {
+    const tryResolveSession = async (attempt: number) => {
+      if (disposed) return;
+      const resolved = resolveInitDataFromPage();
+
+      if (!resolved) {
+        if (attempt < 20) {
+          timer = setTimeout(() => {
+            void tryResolveSession(attempt + 1);
+          }, 150);
+          return;
+        }
+        setAccessMessage('Invalid Telegram Mini App session');
         setLoading(false);
         return;
       }
+
+      setInitData(resolved);
+      const allowed = await ensureMiniAppCharityAccess(resolved);
+      if (!allowed) {
+        if (!disposed) setLoading(false);
+        return;
+      }
       await loadCampaigns();
+      if (disposed) return;
       await loadPromises();
-    })();
+    };
+
+    void tryResolveSession(0);
+
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [ensureMiniAppCharityAccess, loadCampaigns, loadPromises]);
 
   useEffect(() => {

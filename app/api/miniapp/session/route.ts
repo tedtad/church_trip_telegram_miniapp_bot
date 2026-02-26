@@ -51,6 +51,8 @@ export async function POST(request: NextRequest) {
           message: getMiniAppMaintenanceMessage(appSettings),
           appSettings: {
             appName: appSettings.appName,
+            logoUrl: appSettings.logoUrl,
+            logoFilename: appSettings.logoFilename,
             maintenanceMode: true,
             maintenanceMessage: getMiniAppMaintenanceMessage(appSettings),
             charityEnabled: appSettings.charityEnabled,
@@ -119,6 +121,8 @@ export async function POST(request: NextRequest) {
       },
       appSettings: {
         appName: appSettings.appName,
+        logoUrl: appSettings.logoUrl,
+        logoFilename: appSettings.logoFilename,
         telegramChannelUrl: appSettings.telegramChannelUrl,
         telegramChannelName: appSettings.telegramChannelName,
         gnplEnabled: appSettings.gnplEnabled,
