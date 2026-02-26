@@ -4,6 +4,7 @@ import { verifyTelegramMiniAppInitData } from '@/lib/telegram-miniapp';
 import { sendCharityDonationThankYou } from '@/lib/charity-automation';
 import { normalizeDiscountCode, incrementVoucherUsage } from '@/lib/discount-vouchers';
 import { getMiniAppMaintenanceMessage, getMiniAppRuntimeSettings } from '@/lib/miniapp-access';
+import { checkInvitationTargetEligibility } from '@/lib/invitation-targeting';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const MAX_AGE_SECONDS = Number(process.env.TELEGRAM_MINIAPP_MAX_AGE_SEC || 60 * 60 * 24);
@@ -12,6 +13,9 @@ const ALLOWED_RECEIPT_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', '
 
 type InvitationRow = {
   id: string;
+  target?: string | null;
+  trip_id?: string | null;
+  campaign_id?: string | null;
   max_uses?: number | null;
   current_uses?: number | null;
   used_count?: number | null;
@@ -56,11 +60,12 @@ function isMissingColumn(error: unknown, columnName: string) {
 
 async function loadInvitationByCode(supabase: any, invitationCode: string): Promise<InvitationRow | null> {
   const selectCandidates = [
-    'id, max_uses, current_uses, used_count, valid_from, expires_at, is_active',
-    'id, max_uses, current_uses, used_count, expires_at, is_active',
-    'id, max_uses, current_uses, used_count, expires_at',
-    'id, max_uses, current_uses, used_count',
-    'id, max_uses, current_uses',
+    'id, target, trip_id, campaign_id, max_uses, current_uses, used_count, valid_from, expires_at, is_active',
+    'id, target, trip_id, campaign_id, max_uses, current_uses, used_count, expires_at, is_active',
+    'id, target, trip_id, campaign_id, max_uses, current_uses, used_count, expires_at',
+    'id, target, trip_id, campaign_id, max_uses, current_uses, used_count',
+    'id, target, trip_id, campaign_id, max_uses, current_uses',
+    'id, target, campaign_id, max_uses, current_uses',
     'id',
   ];
 
@@ -79,7 +84,10 @@ async function loadInvitationByCode(supabase: any, invitationCode: string): Prom
       isMissingColumn(error, 'is_active') ||
       isMissingColumn(error, 'current_uses') ||
       isMissingColumn(error, 'used_count') ||
-      isMissingColumn(error, 'max_uses')
+      isMissingColumn(error, 'max_uses') ||
+      isMissingColumn(error, 'target') ||
+      isMissingColumn(error, 'campaign_id') ||
+      isMissingColumn(error, 'trip_id')
     ) {
       continue;
     }
@@ -256,6 +264,14 @@ export async function POST(request: NextRequest) {
       if (!invitation) {
         return NextResponse.json({ message: 'Invitation code not found' }, { status: 400 });
       }
+      const invitationTarget = String(invitation.target || 'booking').trim().toLowerCase();
+      if (invitationTarget === 'booking') {
+        return NextResponse.json({ message: 'Invitation is for trip booking, not charity donation' }, { status: 400 });
+      }
+      const invitationCampaignId = String(invitation.campaign_id || '').trim();
+      if (invitationCampaignId && invitationCampaignId !== campaignId) {
+        return NextResponse.json({ message: 'Invitation campaign does not match selected campaign' }, { status: 400 });
+      }
       if (invitation.is_active === false) {
         return NextResponse.json({ message: 'Invitation code is inactive' }, { status: 400 });
       }
@@ -277,6 +293,17 @@ export async function POST(request: NextRequest) {
       const currentUses = Number.isFinite(currentUsesRaw) ? Math.max(0, Math.floor(currentUsesRaw)) : 0;
       if (maxUses !== null && currentUses >= maxUses) {
         return NextResponse.json({ message: 'Invitation code usage limit reached' }, { status: 400 });
+      }
+      const eligibility = await checkInvitationTargetEligibility({
+        supabase,
+        invitationId: invitation.id,
+        telegramUserId: auth.user.id,
+      });
+      if (!eligibility.ok) {
+        return NextResponse.json(
+          { message: eligibility.error || 'Invitation is not assigned to this Telegram account' },
+          { status: 403 }
+        );
       }
       invitationId = invitation.id;
     }

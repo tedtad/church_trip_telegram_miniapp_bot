@@ -363,7 +363,12 @@ async function handleCallback(input: CallbackInput) {
   const baseAmount = Number((unitPrice * quantity).toFixed(2));
   const sessionDiscountCode = normalizeDiscountCode((session as any)?.discount_code || '');
   const effectiveDiscountCode = normalizeDiscountCode(input.discountCode || sessionDiscountCode);
-  const discountResolution = await resolveDiscountVoucher(client, effectiveDiscountCode, session.trip_id);
+  const discountResolution = await resolveDiscountVoucher(
+    client,
+    effectiveDiscountCode,
+    session.trip_id,
+    session.telegram_user_id
+  );
   if (discountResolution.error && effectiveDiscountCode) {
     return NextResponse.json({ ok: false, error: discountResolution.error }, { status: 400 });
   }

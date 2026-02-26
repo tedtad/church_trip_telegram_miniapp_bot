@@ -326,7 +326,12 @@ export async function POST(request: NextRequest) {
 
     const sessionDiscountCode = normalizeDiscountCode(existingSession?.discount_code);
     const effectiveDiscountCode = discountCodeInput || sessionDiscountCode;
-    const discountResolution = await resolveDiscountVoucher(client, effectiveDiscountCode, tripId);
+    const discountResolution = await resolveDiscountVoucher(
+      client,
+      effectiveDiscountCode,
+      tripId,
+      auth.user.id
+    );
     if (discountResolution.error && effectiveDiscountCode) {
       return NextResponse.json({ ok: false, error: discountResolution.error }, { status: 400 });
     }

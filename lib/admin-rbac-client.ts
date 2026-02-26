@@ -89,6 +89,7 @@ const ROLE_PERMISSION_MAP: Record<AdminRole, ReadonlyArray<AdminPermission>> = {
     'bot_manage',
     'backups_manage',
     'settings_manage',
+    'admin_users_manage',
     'reconciliation_view',
     'reports_view',
   ],

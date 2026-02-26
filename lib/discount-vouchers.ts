@@ -1,3 +1,5 @@
+import { checkInvitationTargetEligibility } from '@/lib/invitation-targeting';
+
 type VoucherRow = {
   id: string;
   invitation_code?: string | null;
@@ -106,7 +108,8 @@ async function queryVoucherByCode(client: any, code: string): Promise<DiscountVo
 export async function resolveDiscountVoucher(
   client: any,
   rawCode: unknown,
-  tripId: string
+  tripId: string,
+  telegramUserId?: number | null
 ): Promise<DiscountResolution> {
   const code = normalizeDiscountCode(rawCode);
   if (!code) return { voucher: null, error: null };
@@ -136,8 +139,20 @@ export async function resolveDiscountVoucher(
   if (voucher.maxUses !== null && voucher.currentUses >= voucher.maxUses) {
     return { voucher: null, error: 'Discount code usage limit reached' };
   }
-  if (!Number.isFinite(voucher.discountPercent) || voucher.discountPercent <= 0) {
-    return { voucher: null, error: 'Discount code has zero discount value' };
+  if (!Number.isFinite(voucher.discountPercent) || voucher.discountPercent < 0) {
+    return { voucher: null, error: 'Discount code has invalid discount value' };
+  }
+
+  const eligibility = await checkInvitationTargetEligibility({
+    supabase: client,
+    invitationId: voucher.id,
+    telegramUserId: telegramUserId ?? null,
+  });
+  if (!eligibility.ok) {
+    return {
+      voucher: null,
+      error: eligibility.error || 'Invitation is not assigned to this Telegram account',
+    };
   }
 
   return { voucher, error: null };
@@ -189,4 +204,3 @@ export async function incrementVoucherUsage(client: any, voucherId: string) {
     }
   }
 }
-

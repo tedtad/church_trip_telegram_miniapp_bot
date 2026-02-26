@@ -83,6 +83,7 @@ const ROLE_PERMISSION_MAP: Record<string, ReadonlyArray<AdminPermission>> = {
     'bot_manage',
     'backups_manage',
     'settings_manage',
+    'admin_users_manage',
     'reconciliation_view',
     'reports_view',
   ],
@@ -237,6 +238,13 @@ export async function hasAdminPermissionResolved(params: {
 }) {
   const schemaPermissions = await loadSchemaPermissionsForRole(params.supabase, params.roleInput);
   if (schemaPermissions !== null) {
+    // Backward-compatibility: older RBAC seeds missed this mapping for `admin`.
+    if (
+      params.permission === 'admin_users_manage' &&
+      normalizeAdminRole(params.roleInput) === 'admin'
+    ) {
+      return true;
+    }
     return schemaPermissions.includes(params.permission);
   }
   return hasAdminPermission(params.roleInput, params.permission);

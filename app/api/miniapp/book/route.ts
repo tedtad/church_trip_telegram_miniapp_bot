@@ -323,7 +323,7 @@ export async function POST(request: NextRequest) {
 
     const unitPrice = Number((trip as any).price_per_ticket || 0);
     const baseTotal = Number((unitPrice * quantity).toFixed(2));
-    const discountResolution = await resolveDiscountVoucher(client, discountCode, tripId);
+    const discountResolution = await resolveDiscountVoucher(client, discountCode, tripId, auth.user.id);
     if (discountResolution.error) {
       return NextResponse.json({ ok: false, error: discountResolution.error }, { status: 400 });
     }

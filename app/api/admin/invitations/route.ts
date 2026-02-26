@@ -15,12 +15,20 @@ function detectMissingColumn(error: unknown): string | null {
   return null;
 }
 
+function isRelationshipLookupError(error: unknown) {
+  const message = String((error as any)?.message || '').toLowerCase();
+  return message.includes('relationship') || message.includes('foreign key');
+}
+
 async function loadInvitationsWithFallback(supabase: any, statusFilter: string) {
   const selectCandidates = [
-    'id, invitation_code, trip_id, max_uses, current_uses, used_count, discount_percent, valid_from, expires_at, is_active, qr_code_data, qr_code_url, created_at, trip:trips(id, name, destination)',
-    'id, invitation_code, trip_id, max_uses, current_uses, used_count, discount_percent, valid_from, expires_at, is_active, qr_code_data, qr_code_url, created_at',
-    'id, invitation_code, trip_id, max_uses, current_uses, used_count, discount_percent, expires_at, is_active, qr_code_data, qr_code_url, created_at',
-    'id, invitation_code, trip_id, max_uses, current_uses, used_count, expires_at, is_active, qr_code_data, qr_code_url, created_at',
+    'id, invitation_code, target, trip_id, campaign_id, max_uses, current_uses, used_count, discount_percent, valid_from, expires_at, is_active, qr_code_data, qr_code_url, created_at, trip:trips(id, name, destination, status, departure_date), campaign:charity_campaigns(id, name, status)',
+    'id, invitation_code, target, trip_id, campaign_id, max_uses, current_uses, used_count, discount_percent, valid_from, expires_at, is_active, qr_code_data, qr_code_url, created_at, trip:trips(id, name, destination), campaign:charity_campaigns(id, name)',
+    'id, invitation_code, target, trip_id, campaign_id, max_uses, current_uses, used_count, discount_percent, valid_from, expires_at, is_active, qr_code_data, qr_code_url, created_at',
+    'id, invitation_code, target, trip_id, campaign_id, max_uses, current_uses, used_count, discount_percent, expires_at, is_active, qr_code_data, qr_code_url, created_at',
+    'id, invitation_code, target, trip_id, campaign_id, max_uses, current_uses, used_count, expires_at, is_active, qr_code_data, qr_code_url, created_at',
+    'id, invitation_code, target, trip_id, campaign_id, max_uses, current_uses, used_count, expires_at, is_active, created_at',
+    'id, invitation_code, trip_id, campaign_id, max_uses, current_uses, used_count, expires_at, is_active, created_at',
     'id, invitation_code, trip_id, max_uses, current_uses, used_count, expires_at, is_active, created_at',
     '*',
   ];
@@ -37,10 +45,43 @@ async function loadInvitationsWithFallback(supabase: any, statusFilter: string) 
     if (!error) return data || [];
 
     const missing = detectMissingColumn(error);
-    if (!missing) break;
+    if (!missing && !isRelationshipLookupError(error)) break;
   }
 
   throw new Error('Failed to fetch invitations');
+}
+
+function isMissingRelation(error: unknown, relationName: string) {
+  const message = String((error as any)?.message || '').toLowerCase();
+  return (
+    message.includes('relation') &&
+    message.includes(relationName.toLowerCase()) &&
+    message.includes('does not exist')
+  );
+}
+
+async function loadInvitationTargetCounts(supabase: any, invitationIds: string[]) {
+  const unique = [...new Set(invitationIds.filter(Boolean))];
+  if (!unique.length) return {} as Record<string, number>;
+
+  const { data, error } = await supabase
+    .from('invitation_target_users')
+    .select('invitation_id')
+    .in('invitation_id', unique);
+  if (error) {
+    if (isMissingRelation(error, 'invitation_target_users')) {
+      return {} as Record<string, number>;
+    }
+    throw error;
+  }
+
+  const counts: Record<string, number> = {};
+  for (const row of (data || []) as Array<{ invitation_id?: string | null }>) {
+    const invitationId = String(row?.invitation_id || '').trim();
+    if (!invitationId) continue;
+    counts[invitationId] = (counts[invitationId] || 0) + 1;
+  }
+  return counts;
 }
 
 export async function GET(request: NextRequest) {
@@ -58,11 +99,25 @@ export async function GET(request: NextRequest) {
       .trim()
       .toLowerCase();
     const invitations = await loadInvitationsWithFallback(supabase, statusFilter);
+    const targetCounts = await loadInvitationTargetCounts(
+      supabase,
+      (invitations || []).map((inv: any) => String(inv?.id || ''))
+    );
+    const hydratedInvitations = (invitations || []).map((inv: any) => {
+      const invitationId = String(inv?.id || '');
+      const targetUserCount = targetCounts[invitationId] || 0;
+      const targetMode = targetUserCount <= 0 ? 'public' : targetUserCount === 1 ? 'single' : 'bulk';
+      return {
+        ...inv,
+        target_user_count: targetUserCount,
+        target_mode: targetMode,
+      };
+    });
 
     return NextResponse.json({
       ok: true,
       success: true,
-      invitations,
+      invitations: hydratedInvitations,
     });
   } catch (error) {
     console.error('[admin-invitations] GET error:', error);

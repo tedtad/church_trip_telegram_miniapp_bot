@@ -138,6 +138,7 @@ VALUES
   ('admin', 'bot_manage', TRUE),
   ('admin', 'backups_manage', TRUE),
   ('admin', 'settings_manage', TRUE),
+  ('admin', 'admin_users_manage', TRUE),
   ('admin', 'reconciliation_view', TRUE),
   ('admin', 'reports_view', TRUE),
 
@@ -174,4 +175,3 @@ SET
 UPDATE admin_users
 SET role = 'admin'
 WHERE COALESCE(TRIM(role), '') = '';
-

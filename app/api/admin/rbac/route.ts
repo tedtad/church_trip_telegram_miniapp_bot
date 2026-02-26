@@ -45,7 +45,12 @@ async function ensureRbacSchemaAvailable(supabase: any) {
 async function resolveRolePermissionsForActor(supabase: any, actorRole: string) {
   const config = await listRbacConfig(supabase);
   if (config.source === 'schema') {
-    return config.rolePermissions[actorRole] || [];
+    const permissions = [...(config.rolePermissions[actorRole] || [])];
+    // Backward-compatibility for older seeds where admin_users_manage was not granted to `admin`.
+    if (actorRole === 'admin' && !permissions.includes('admin_users_manage')) {
+      permissions.push('admin_users_manage');
+    }
+    return permissions;
   }
   return [...getAdminPermissionsForRole(actorRole)];
 }

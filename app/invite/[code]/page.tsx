@@ -128,6 +128,7 @@ export default async function InviteCodePage({ params, searchParams = {} }: Page
   const resolvedSearchParams = await Promise.resolve(searchParams);
   const code = normalizeDiscountCode(resolvedParams?.code || '');
   const queryTarget = getFirst(resolvedSearchParams.target).toLowerCase() === 'charity' ? 'charity' : '';
+  const queryTripId = getFirst(resolvedSearchParams.tripId || resolvedSearchParams.trip);
   const queryCampaignId = getFirst(resolvedSearchParams.campaignId || resolvedSearchParams.campaign);
   const initData = getFirst(resolvedSearchParams.initData);
   const tgWebAppData = getFirst(resolvedSearchParams.tgWebAppData);
@@ -153,11 +154,38 @@ export default async function InviteCodePage({ params, searchParams = {} }: Page
     const invitationTarget =
       String(invitation?.target || '').trim().toLowerCase() === 'charity' ? 'charity' : 'booking';
     const target = queryTarget || invitationTarget;
+    const linkedTripId = queryTripId || String(invitation?.trip_id || '').trim();
     const campaignId = queryCampaignId || String(invitation?.campaign_id || '').trim();
+    if (target === 'booking' && !linkedTripId) {
+      return (
+        <main className="min-h-screen bg-slate-950 text-white p-6 flex items-center justify-center">
+          <div className="max-w-md w-full rounded-xl border border-slate-700 bg-slate-900/70 p-6 space-y-4">
+            <h1 className="text-xl font-semibold">Invitation Not Available</h1>
+            <p className="text-sm text-slate-300">This invitation is missing trip linkage.</p>
+            <Link href="/miniapp" className="inline-block text-sm text-cyan-300 underline">
+              Open Mini App
+            </Link>
+          </div>
+        </main>
+      );
+    }
+    if (target === 'charity' && !campaignId) {
+      return (
+        <main className="min-h-screen bg-slate-950 text-white p-6 flex items-center justify-center">
+          <div className="max-w-md w-full rounded-xl border border-slate-700 bg-slate-900/70 p-6 space-y-4">
+            <h1 className="text-xl font-semibold">Invitation Not Available</h1>
+            <p className="text-sm text-slate-300">This invitation is missing charity campaign linkage.</p>
+            <Link href="/miniapp" className="inline-block text-sm text-cyan-300 underline">
+              Open Mini App
+            </Link>
+          </div>
+        </main>
+      );
+    }
     const redirectUrl = buildRedirectUrl({
       code,
       target,
-      tripId: String(invitation?.trip_id || '').trim(),
+      tripId: linkedTripId,
       campaignId,
       initData,
       tgWebAppData,
